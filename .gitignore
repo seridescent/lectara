@@ -1,0 +1,10 @@
+/target
+/result
+/result-lib
+.direnv
+
+/.pre-commit-config.yaml
+
+.envrc
+
+.DS_Store
