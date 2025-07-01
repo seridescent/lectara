@@ -3,6 +3,7 @@
     "rust-analyzer.files.exclude": [
         ".direnv"
     ],
+    "rust-analyzer.cargo.features": ["test-helpers"],
     // https://twitter.com/sridca/status/1674947342607216641
     // "editor.inlayHints.enabled": "offUnlessPressed",
 }

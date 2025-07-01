@@ -12,7 +12,7 @@ pub struct ContentItem {
     pub created_at: chrono::NaiveDateTime,
 }
 
-#[derive(Insertable, Deserialize)]
+#[derive(Debug, Insertable, Deserialize)]
 #[diesel(table_name = crate::schema::content_items)]
 pub struct NewContentItem {
     pub url: String,
