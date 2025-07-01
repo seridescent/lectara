@@ -1,3 +1,3 @@
 # lectara
 
-collecting internet content consumed for later use
+collecting consumed internet content for later use.

@@ -1,0 +1,7 @@
+CREATE TABLE content_items (
+    id INTEGER PRIMARY KEY NOT NULL,
+    url TEXT NOT NULL,
+    title TEXT,
+    author TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
