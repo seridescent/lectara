@@ -7,9 +7,14 @@
   perSystem = { config, self', pkgs, lib, ... }: {
     rust-project = {
       crates = {
-        lectara = {
+        lectara-service = {
           crane.args = {
-            packages.default = self'.packages.lectara;
+            packages.lectara-service = self'.packages.lectara-service;
+          };
+        };
+        lectara-cli = {
+          crane.args = {
+            packages.lectara-cli = self'.packages.lectara-cli;
           };
         };
       };

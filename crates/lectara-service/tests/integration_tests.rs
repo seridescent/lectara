@@ -11,8 +11,8 @@ use tower::{Service, ServiceExt};
 
 mod helpers {
     use super::*;
-    use lectara::test_helpers::establish_test_connection;
-    use lectara::{AppState, create_app};
+    use lectara_service::test_helpers::establish_test_connection;
+    use lectara_service::{AppState, create_app};
 
     pub fn create_test_app() -> (Router, Arc<Mutex<diesel::sqlite::SqliteConnection>>) {
         let connection = establish_test_connection();
@@ -86,7 +86,7 @@ async fn test_add_content_endpoint() -> Result<()> {
 
     // Verify database state
     {
-        use lectara::test_helpers::test_utils;
+        use lectara_service::test_helpers::test_utils;
         let mut conn = db.lock().unwrap();
 
         assert_eq!(test_utils::count_content_items(&mut *conn), 1);
@@ -122,7 +122,7 @@ async fn test_add_content_minimal_payload() -> Result<()> {
 
     // Verify database state
     {
-        use lectara::test_helpers::test_utils;
+        use lectara_service::test_helpers::test_utils;
         let mut conn = db.lock().unwrap();
 
         assert_eq!(test_utils::count_content_items(&mut *conn), 1);
@@ -172,7 +172,7 @@ async fn test_multiple_content_items() -> Result<()> {
 
     // Verify database state
     {
-        use lectara::test_helpers::test_utils;
+        use lectara_service::test_helpers::test_utils;
         let mut conn = db.lock().unwrap();
 
         assert_eq!(test_utils::count_content_items(&mut *conn), 2);
