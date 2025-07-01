@@ -11,20 +11,65 @@ like URLs, titles, and authors, and then persists it to a SQLite database.
 
 ## Development Environment
 
-This project uses:
-- **Rust** (edition 2021) as the primary language
-- **Nix** for development environment management (see flake.nix)
-- **Pre-commit hooks** for code quality
+### Rust
+
+**Rust** (edition 2024) is the primary language. 
+IMPORTANT: Rust 2024 edition DOES exist and was recently stablilized. 
+Do not try to revert the project to edition 2021.
+
+### Nix
+
+**Nix** for development environment management and building. See flake.nix and nix/modules/
+
+Building crates is handled in nix/modules/rust.nix . 
+Since Nix creates hermetic environments, if a crate fails to build, we should remember to check that 
+the inputs are correct.
 
 ## Common Commands
 
-### Building and Running
-- `cargo build` - Build the project
-- `cargo check` - Check compilation without building
+### Building and Testing
+- `nix flake check` - builds all targets with Clippy, runs tests, and formats code
 
 ## Architecture
 
-The project is currently minimal with:
-- `src/main.rs` - Entry point with basic hello world
-- `Cargo.toml` - Standard Rust project configuration
-- `flake.nix` - Nix development environment setup
+This is a Rust workspace with two crates:
+
+### lectara-service
+Web service for collecting and storing content information.
+
+**Key components:**
+- `src/main.rs` - HTTP server entry point (runs on port 3000)
+- `src/lib.rs` - Core application logic with Axum router
+- `src/models.rs` - Diesel ORM models for `ContentItem` and `NewContentItem`
+- `src/schema.rs` - Auto-generated Diesel schema
+- `migrations/` - Database migrations for SQLite schema
+- `tests/` - Integration tests with test utilities in `tests/common/`
+
+**API endpoints:**
+- `GET /health` - Health check
+- `POST /content` - Add content item (requires `url`, optional `title` and `author`)
+
+**Dependencies:**
+- **Axum** - Web framework
+- **Diesel** - ORM with SQLite backend
+- **Chrono** - DateTime handling
+- **Serde** - JSON serialization
+
+### lectara-cli
+Command-line interface for interacting with the service.
+
+**Key components:**
+- `src/main.rs` - CLI entry point
+- Binary name: `lectara`
+
+**Dependencies:**
+- **Clap** - CLI argument parsing
+- **Reqwest** - HTTP client for service communication
+
+### Database Schema
+Single table `content_items`:
+- `id` (INTEGER PRIMARY KEY)
+- `url` (TEXT NOT NULL)
+- `title` (TEXT, optional)
+- `author` (TEXT, optional)
+- `created_at` (TIMESTAMP, auto-generated)
