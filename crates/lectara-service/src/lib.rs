@@ -12,8 +12,6 @@ use std::sync::{Arc, Mutex};
 
 pub mod models;
 pub mod schema;
-#[cfg(any(test, feature = "test-helpers"))]
-pub mod test_helpers;
 
 #[derive(Clone)]
 pub struct AppState {

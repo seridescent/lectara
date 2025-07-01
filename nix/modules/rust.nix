@@ -6,25 +6,43 @@
   ];
   perSystem = { config, self', pkgs, lib, ... }: {
     rust-project = {
-      crates = {
-        lectara-service = {
-          crane.args = {
-            packages.lectara-service = self'.packages.lectara-service;
-          };
+      src =
+        let
+          anyFilter = filterList: path: type: builtins.any (f: f path type) filterList;
+        in
+        lib.cleanSourceWith {
+          src = inputs.self;
+          filter = anyFilter [
+            config.rust-project.crane-lib.filterCargoSources
+            (path: _type: lib.hasPrefix "${inputs.self}/crates/lectara-service/migrations" path)
+          ];
         };
-        lectara-cli = {
-          crane.args = {
-            packages.lectara-cli = self'.packages.lectara-cli;
-          };
-        };
-      };
 
-      toolchain = (pkgs.rust-bin.stable."1.88.0".default).override {
+      crates =
+        {
+          lectara-service = {
+            autoWire = [ "crate" "clippy" ];
+            crane.args.buildInputs = [ pkgs.sqlite ];
+          };
+          lectara-cli = {
+            autoWire = [ "crate" "clippy" ];
+          };
+        };
+
+      toolchain = (pkgs.rust-bin.stable.latest.default).override {
         extensions = [
           "rust-src"
           "rust-analyzer"
           "clippy"
         ];
+      };
+    };
+
+    apps = {
+      default = {
+        type = "app";
+        program = "${self'.packages.lectara-cli}/bin/lectara";
+        meta.description = "Command-line interface to lectara service";
       };
     };
   };

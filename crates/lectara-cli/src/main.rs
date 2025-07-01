@@ -68,7 +68,7 @@ async fn add_content(
     title: Option<String>,
     author: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
-    let endpoint = format!("{}/content", service_url);
+    let endpoint = format!("{service_url}/content");
 
     let payload = NewContentItem { url, title, author };
 
@@ -89,13 +89,13 @@ async fn add_content(
 }
 
 async fn check_health(client: &Client, service_url: &str) -> Result<(), Box<dyn Error>> {
-    let endpoint = format!("{}/health", service_url);
+    let endpoint = format!("{service_url}/health");
 
     let response = client.get(&endpoint).send().await?;
 
     if response.status().is_success() {
         let health_status = response.text().await?;
-        println!("Service health: {}", health_status);
+        println!("Service health: {health_status}");
     } else {
         eprintln!("Health check failed: {}", response.status());
     }

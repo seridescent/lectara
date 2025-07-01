@@ -9,9 +9,11 @@ use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use tower::{Service, ServiceExt};
 
+mod common;
+
 mod helpers {
     use super::*;
-    use lectara_service::test_helpers::establish_test_connection;
+    use crate::common::establish_test_connection;
     use lectara_service::{AppState, create_app};
 
     pub fn create_test_app() -> (Router, Arc<Mutex<diesel::sqlite::SqliteConnection>>) {
@@ -59,7 +61,7 @@ async fn test_health_endpoint() -> Result<()> {
     let (status, response) = helpers::make_request(&mut app, request).await?;
 
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(response, json!("OK"));
+    assert_eq!(response, json!("O"));
     Ok(())
 }
 
@@ -86,13 +88,13 @@ async fn test_add_content_endpoint() -> Result<()> {
 
     // Verify database state
     {
-        use lectara_service::test_helpers::test_utils;
+        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
 
-        assert_eq!(test_utils::count_content_items(&mut *conn), 1);
+        assert_eq!(test_utils::count_content_items(&mut conn), 1);
 
         let saved_item =
-            test_utils::get_content_item_by_url(&mut *conn, "https://example.com/test-article")
+            test_utils::get_content_item_by_url(&mut conn, "https://example.com/test-article")
                 .expect("Content item should exist in database");
 
         assert_eq!(saved_item.url, "https://example.com/test-article");
@@ -122,13 +124,13 @@ async fn test_add_content_minimal_payload() -> Result<()> {
 
     // Verify database state
     {
-        use lectara_service::test_helpers::test_utils;
+        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
 
-        assert_eq!(test_utils::count_content_items(&mut *conn), 1);
+        assert_eq!(test_utils::count_content_items(&mut conn), 1);
 
         let saved_item =
-            test_utils::get_content_item_by_url(&mut *conn, "https://example.com/minimal")
+            test_utils::get_content_item_by_url(&mut conn, "https://example.com/minimal")
                 .expect("Content item should exist in database");
 
         assert_eq!(saved_item.url, "https://example.com/minimal");
@@ -172,12 +174,12 @@ async fn test_multiple_content_items() -> Result<()> {
 
     // Verify database state
     {
-        use lectara_service::test_helpers::test_utils;
+        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
 
-        assert_eq!(test_utils::count_content_items(&mut *conn), 2);
+        assert_eq!(test_utils::count_content_items(&mut conn), 2);
 
-        let all_items = test_utils::get_all_content_items(&mut *conn);
+        let all_items = test_utils::get_all_content_items(&mut conn);
         assert_eq!(all_items.len(), 2);
 
         let urls: Vec<String> = all_items.iter().map(|item| item.url.clone()).collect();
