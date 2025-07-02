@@ -10,7 +10,9 @@
         nixpkgs-fmt.enable = true;
 
         rustfmt.enable = true;
-        rustfmt.package = config.rust-project.toolchain;
+        rustfmt.package = pkgs.rust-bin.fromRustupToolchainFile (inputs.self + /rust-toolchain.toml);
+
+        # taplo.enable = true;
       };
     };
   };

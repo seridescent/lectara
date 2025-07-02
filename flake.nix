@@ -8,9 +8,7 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
 
-    rust-flake.url = "github:juspay/rust-flake";
-    rust-flake.inputs.nixpkgs.follows = "nixpkgs";
-    rust-flake.inputs.rust-overlay.follows = "rust-overlay";
+    crane.url = "github:ipetkov/crane";
 
     git-hooks-nix.url = "github:cachix/git-hooks.nix";
     git-hooks-nix.inputs.nixpkgs.follows = "nixpkgs";
@@ -34,9 +32,10 @@
       ];
 
       # See ./nix/modules/*.nix for the modules that are imported here.
-      imports = with builtins;
-        map
+      imports =
+        (builtins.map
           (fn: ./nix/modules/${fn})
-          (attrNames (readDir ./nix/modules));
+          (builtins.attrNames (builtins.readDir ./nix/modules)))
+        ++ [ ];
     };
 }

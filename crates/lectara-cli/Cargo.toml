@@ -1,7 +1,7 @@
 [package]
 name = "lectara-cli"
 description = "Command-line interface for Lectara content collection service"
-version = "0.1.0"
+version.workspace = true
 authors.workspace = true
 edition.workspace = true
 

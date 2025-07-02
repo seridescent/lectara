@@ -16,15 +16,12 @@
 
       devshell = {
         packagesFrom = [
-          # defined by rust-flake
           self'.devShells.rust
-
           config.treefmt.build.devShell
         ];
 
         packages = [
           pkgs.nixd # Nix language server
-
           pkgs.diesel-cli
         ];
 

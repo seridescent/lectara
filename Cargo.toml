@@ -1,9 +1,13 @@
 [workspace]
-members = ["crates/lectara-service", "crates/lectara-cli"]
+# members = ["crates/lectara-service", "crates/lectara-cli"]
+members = ["crates/*"]
 resolver = "2"
 
 [workspace.package]
 authors = ["seridescent"]
 edition = "2024"
+version = "0.1.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[workspace.metadata.crane]
+name = "lectara-workspace"
