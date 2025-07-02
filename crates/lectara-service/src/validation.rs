@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::convert::TryFrom;
 use std::fmt;
 use thiserror::Error;
 use url::Url;
@@ -33,10 +34,18 @@ impl fmt::Display for Scheme {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedUrl {
     pub scheme: Scheme,
-    pub host: String,          // guaranteed non-empty and non-local
-    pub port: Option<u16>,     // only non-default ports
-    pub path: String,          // normalized (no trailing slash except root)
-    pub query: Option<String>, // sorted parameters
+
+    /// guaranteed non-empty and non-local
+    pub host: String,
+
+    /// only non-default ports
+    pub port: Option<u16>,
+
+    /// normalized (no trailing slash except root)
+    pub path: String,
+
+    /// sorted parameters as structured data
+    pub query: Option<BTreeMap<String, String>>,
 }
 
 impl fmt::Display for ValidatedUrl {
@@ -49,13 +58,105 @@ impl fmt::Display for ValidatedUrl {
 
         write!(f, "{}", self.path)?;
 
-        if let Some(ref query) = self.query {
-            if !query.is_empty() {
-                write!(f, "?{query}")?;
+        if let Some(ref query_params) = self.query {
+            if !query_params.is_empty() {
+                write!(f, "?")?;
+                let query_string = query_params
+                    .iter()
+                    .map(|(k, v)| {
+                        if v.is_empty() {
+                            k.clone()
+                        } else {
+                            format!("{k}={v}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("&");
+                write!(f, "{query_string}")?;
             }
         }
 
         Ok(())
+    }
+}
+
+impl TryFrom<Url> for ValidatedUrl {
+    type Error = ValidationError;
+
+    fn try_from(url: Url) -> Result<Self, Self::Error> {
+        // Parse and validate scheme
+        let scheme = match url.scheme() {
+            "http" => Scheme::Http,
+            "https" => Scheme::Https,
+            scheme => return Err(ValidationError::UnsupportedScheme(scheme.to_string())),
+        };
+
+        // Must have a host for internet content
+        let host = url
+            .host_str()
+            .ok_or_else(|| ValidationError::InvalidUrl("URL must have a host".to_string()))?;
+
+        // Host cannot be empty
+        if host.is_empty() {
+            return Err(ValidationError::InvalidUrl(
+                "Host cannot be empty".to_string(),
+            ));
+        }
+
+        // Normalize host to lowercase and check for local addresses
+        let host = host.to_lowercase();
+        if host == "localhost"
+            || host.starts_with("127.")
+            || host.starts_with("192.168.")
+            || host.starts_with("10.")
+        {
+            return Err(ValidationError::InvalidUrl(
+                "Local addresses not allowed".to_string(),
+            ));
+        }
+
+        // Normalize port (remove default ports)
+        let port = url.port().filter(|&p| {
+            let default_port = match scheme {
+                Scheme::Http => 80,
+                Scheme::Https => 443,
+            };
+            p != default_port
+        });
+
+        // Normalize path
+        let path = url.path();
+        let path = if path.is_empty() || path == "/" {
+            "/".to_string()
+        } else if let Some(stripped) = path.strip_suffix('/') {
+            stripped.to_string()
+        } else {
+            path.to_string()
+        };
+
+        // Sort query parameters as structured data
+        let query = if url.query().is_some() {
+            let mut params: BTreeMap<String, String> = BTreeMap::new();
+            for (key, value) in url.query_pairs() {
+                params.insert(key.to_string(), value.to_string());
+            }
+
+            if params.is_empty() {
+                None
+            } else {
+                Some(params)
+            }
+        } else {
+            None
+        };
+
+        Ok(ValidatedUrl {
+            scheme,
+            host,
+            port,
+            path,
+            query,
+        })
     }
 }
 
@@ -65,91 +166,7 @@ pub fn validate_url(url_str: &str) -> Result<ValidatedUrl, ValidationError> {
     }
 
     let url = Url::parse(url_str).map_err(|_| ValidationError::InvalidUrl(url_str.to_string()))?;
-
-    // Parse and validate scheme
-    let scheme = match url.scheme() {
-        "http" => Scheme::Http,
-        "https" => Scheme::Https,
-        scheme => return Err(ValidationError::UnsupportedScheme(scheme.to_string())),
-    };
-
-    // Must have a host for internet content
-    let host = url
-        .host_str()
-        .ok_or_else(|| ValidationError::InvalidUrl("URL must have a host".to_string()))?;
-
-    // Host cannot be empty
-    if host.is_empty() {
-        return Err(ValidationError::InvalidUrl(
-            "Host cannot be empty".to_string(),
-        ));
-    }
-
-    // Normalize host to lowercase and check for local addresses
-    let host = host.to_lowercase();
-    if host == "localhost"
-        || host.starts_with("127.")
-        || host.starts_with("192.168.")
-        || host.starts_with("10.")
-    {
-        return Err(ValidationError::InvalidUrl(
-            "Local addresses not allowed".to_string(),
-        ));
-    }
-
-    // Normalize port (remove default ports)
-    let port = url.port().filter(|&p| {
-        let default_port = match scheme {
-            Scheme::Http => 80,
-            Scheme::Https => 443,
-        };
-        p != default_port
-    });
-
-    // Normalize path
-    let path = url.path();
-    let path = if path.is_empty() || path == "/" {
-        "/".to_string()
-    } else if let Some(stripped) = path.strip_suffix('/') {
-        stripped.to_string()
-    } else {
-        path.to_string()
-    };
-
-    // Sort query parameters
-    let query = if url.query().is_some() {
-        let mut params: BTreeMap<String, String> = BTreeMap::new();
-        for (key, value) in url.query_pairs() {
-            params.insert(key.to_string(), value.to_string());
-        }
-
-        if params.is_empty() {
-            None
-        } else {
-            let sorted_query = params
-                .iter()
-                .map(|(k, v)| {
-                    if v.is_empty() {
-                        k.clone()
-                    } else {
-                        format!("{k}={v}")
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            Some(sorted_query)
-        }
-    } else {
-        None
-    };
-
-    Ok(ValidatedUrl {
-        scheme,
-        host,
-        port,
-        path,
-        query,
-    })
+    ValidatedUrl::try_from(url)
 }
 
 pub fn normalize_url(url_str: &str) -> Result<String, ValidationError> {
@@ -278,9 +295,35 @@ mod tests {
         assert_eq!(validated.host, "example.com"); // normalized to lowercase
         assert_eq!(validated.port, None); // default port removed
         assert_eq!(validated.path, "/Path"); // trailing slash removed, fragment gone
-        assert_eq!(validated.query, Some("a=1&c=3".to_string())); // sorted params
+        // Query should be stored as structured data, sorted
+        let expected_query = {
+            let mut map = BTreeMap::new();
+            map.insert("a".to_string(), "1".to_string());
+            map.insert("c".to_string(), "3".to_string());
+            Some(map)
+        };
+        assert_eq!(validated.query, expected_query);
 
         // Converting to string gives normalized URL
         assert_eq!(validated.to_string(), "https://example.com/Path?a=1&c=3");
+    }
+
+    #[test]
+    fn test_try_from_trait() {
+        // Test the TryFrom<Url> trait implementation
+        let url = Url::parse("https://example.com/test?b=2&a=1").unwrap();
+        let validated = ValidatedUrl::try_from(url).unwrap();
+
+        assert_eq!(validated.host, "example.com");
+        assert_eq!(validated.path, "/test");
+
+        // Query parameters should be stored as BTreeMap (automatically sorted)
+        let mut expected_params = BTreeMap::new();
+        expected_params.insert("a".to_string(), "1".to_string());
+        expected_params.insert("b".to_string(), "2".to_string());
+        assert_eq!(validated.query, Some(expected_params));
+
+        // Display should show sorted parameters
+        assert_eq!(validated.to_string(), "https://example.com/test?a=1&b=2");
     }
 }

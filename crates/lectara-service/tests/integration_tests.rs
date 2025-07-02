@@ -405,7 +405,7 @@ async fn test_missing_content_type() -> Result<()> {
     let (status, _) = helpers::make_request(&mut app, request).await?;
 
     // Axum should reject missing content types for JSON extraction
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
     Ok(())
 }
 
