@@ -1,7 +1,6 @@
 [workspace]
 members = ["crates/lectara-service", "crates/lectara-cli"]
 resolver = "2"
-default-run = "lectara"
 
 [workspace.package]
 authors = ["seridescent"]

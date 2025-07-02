@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-lectara is a Rust project for "collecting internet content consumed for later use." 
+lectara is a Rust project for collecting and logging consumed internet content for later use. 
 
-The first basic version should be a web service that takes requests with content information,
+The first basic version is a web service that takes requests with content information,
 like URLs, titles, and authors, and then persists it to a SQLite database.
 
 ## Development Environment
