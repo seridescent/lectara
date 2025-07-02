@@ -28,7 +28,8 @@ the inputs are correct.
 ## Common Commands
 
 ### Building and Testing
-- `nix flake check` - builds all targets with Clippy, runs tests, and formats code
+- `nix flake check` - builds all targets with Clippy, runs tests, and checks code formatting
+- If running `nix flake check` shows a formatting error, run `nix fmt`. Do not try to fix formatting errors manually, just run `nix fmt`
 
 ## Architecture
 

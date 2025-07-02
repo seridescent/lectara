@@ -1,3 +1,4 @@
+use crate::validation::normalize_url;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -18,4 +19,20 @@ pub struct NewContentItem {
     pub url: String,
     pub title: Option<String>,
     pub author: Option<String>,
+}
+
+impl NewContentItem {
+    pub fn new(
+        url: String,
+        title: Option<String>,
+        author: Option<String>,
+    ) -> Result<Self, crate::validation::ValidationError> {
+        let normalized_url = normalize_url(&url)?;
+
+        Ok(NewContentItem {
+            url: normalized_url,
+            title,
+            author,
+        })
+    }
 }
