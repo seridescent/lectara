@@ -8,6 +8,7 @@ use diesel::prelude::*;
 use diesel::sqlite::SqliteConnection;
 use serde::Serialize;
 use std::sync::{Arc, Mutex};
+use tracing::{debug, info, instrument, warn};
 
 use crate::errors::ApiError;
 
@@ -37,16 +38,18 @@ async fn health() -> &'static str {
     "OK"
 }
 
+#[instrument(skip(state), fields(url = %payload.url, has_title = payload.title.is_some(), has_author = payload.author.is_some()))]
 async fn add_content(
     State(state): State<AppState>,
     Json(payload): Json<CreateContentRequest>,
 ) -> Result<ResponseJson<ContentResponse>, ApiError> {
     use crate::schema::content_items;
 
-    println!("Received content: {payload:#?}");
+    debug!("Processing content request");
 
     // Create and validate the content item
     let new_content = models::NewContentItem::new(payload.url, payload.title, payload.author)?;
+    debug!(normalized_url = %new_content.url, "URL validated and normalized");
 
     let mut conn = state.db.lock().unwrap();
 
@@ -59,10 +62,18 @@ async fn add_content(
     if let Some(existing) = existing_item {
         // Check if metadata matches - if not, return error
         if existing.title != new_content.title || existing.author != new_content.author {
+            warn!(
+                existing_title = ?existing.title,
+                new_title = ?new_content.title,
+                existing_author = ?existing.author,
+                new_author = ?new_content.author,
+                "URL already exists with different metadata"
+            );
             return Err(ApiError::DuplicateUrlDifferentMetadata);
         }
 
         // Return existing item (idempotent behavior)
+        info!(id = existing.id, "Returning existing content item");
         let response = ContentResponse {
             id: existing.id as u32,
         };
@@ -74,6 +85,11 @@ async fn add_content(
         .values(&new_content)
         .returning(content_items::all_columns)
         .get_result::<models::ContentItem>(&mut *conn)?;
+
+    info!(
+        id = inserted_content.id,
+        "Successfully created new content item"
+    );
 
     let response = ContentResponse {
         id: inserted_content.id as u32,

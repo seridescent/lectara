@@ -5,6 +5,7 @@ use axum::{
 };
 use serde_json::json;
 use thiserror::Error;
+use tracing::error;
 
 #[derive(Error, Debug)]
 pub enum ApiError {
@@ -28,7 +29,7 @@ impl IntoResponse for ApiError {
             ApiError::DuplicateUrlDifferentMetadata => (StatusCode::CONFLICT, self.to_string()),
             ApiError::DatabaseError(ref err) => {
                 // Log the detailed error but don't expose it to the client
-                eprintln!("Database error: {err}");
+                error!(error = %err, "Database error occurred");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Internal server error".to_string(),
