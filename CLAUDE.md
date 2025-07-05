@@ -31,6 +31,7 @@ the inputs are correct.
 - `nix flake check` - builds all targets with Clippy, runs tests, and checks code formatting
 - If running `nix flake check` shows a formatting error, run `nix fmt`. Do not try to fix formatting errors manually, just run `nix fmt`
 - If running `nix flake check` shows a more significant error, use the provided `nix log` command to get more information
+- You can also run normal cargo commands if that is more useful.
 
 ## Architecture
 
