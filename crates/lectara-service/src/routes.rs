@@ -88,9 +88,8 @@ async fn add_content(
     Ok(ResponseJson(response))
 }
 
-pub fn create_router(state: AppState) -> Router {
+pub fn create_router() -> Router<AppState> {
     Router::new()
         .route("/health", get(health))
         .route("/content", post(add_content))
-        .with_state(state)
 }

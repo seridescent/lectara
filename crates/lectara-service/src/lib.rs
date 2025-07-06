@@ -15,5 +15,5 @@ pub struct AppState {
 }
 
 pub fn create_app(state: AppState) -> Router {
-    routes::create_router(state)
+    routes::create_router().with_state(state)
 }
