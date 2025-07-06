@@ -15,6 +15,7 @@ use crate::errors::ApiError;
 pub mod errors;
 pub mod models;
 pub mod schema;
+pub mod shutdown;
 pub mod validation;
 
 #[derive(Clone)]
