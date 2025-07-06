@@ -1,13 +1,8 @@
 use anyhow::Result;
-use axum::{
-    Router,
-    body::{Body, to_bytes},
-    http::{Request, StatusCode},
-};
-use hyper::Method;
+use axum::http::StatusCode;
+use axum_test::TestServer;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
-use tower::{Service, ServiceExt};
 
 mod common;
 
@@ -16,58 +11,32 @@ mod helpers {
     use crate::common::establish_test_connection;
     use lectara_service::{DefaultAppState, create_app};
 
-    pub fn create_test_app() -> (Router, Arc<Mutex<diesel::sqlite::SqliteConnection>>) {
+    pub fn create_test_server() -> (TestServer, Arc<Mutex<diesel::sqlite::SqliteConnection>>) {
         let connection = establish_test_connection();
         let db = Arc::new(Mutex::new(connection));
 
         let state = DefaultAppState::new(db.clone());
-
         let app = create_app(state);
-        (app, db)
-    }
 
-    pub async fn make_request(
-        app: &mut Router,
-        request: Request<Body>,
-    ) -> Result<(StatusCode, Value)> {
-        let response = ServiceExt::<Request<Body>>::ready(app)
-            .await?
-            .call(request)
-            .await?;
-
-        let status = response.status();
-        let body_bytes = to_bytes(response.into_body(), usize::MAX).await?;
-        let body_str = String::from_utf8(body_bytes.to_vec())?;
-
-        let json_response: Value = if body_str.is_empty() || body_str == "\"OK\"" {
-            json!(body_str.trim_matches('"'))
-        } else {
-            serde_json::from_str(&body_str).unwrap_or(json!(body_str))
-        };
-
-        Ok((status, json_response))
+        let server = TestServer::new(app).unwrap();
+        (server, db)
     }
 }
 
 #[tokio::test]
 async fn test_health_endpoint() -> Result<()> {
-    let (mut app, _db) = helpers::create_test_app();
+    let (server, _db) = helpers::create_test_server();
 
-    let request = Request::builder()
-        .method("GET")
-        .uri("/health")
-        .body(Body::empty())?;
+    let response = server.get("/health").await;
 
-    let (status, response) = helpers::make_request(&mut app, request).await?;
-
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(response, json!("OK"));
+    response.assert_status_ok();
+    assert_eq!(response.text(), "OK");
     Ok(())
 }
 
 #[tokio::test]
 async fn test_add_content_endpoint() -> Result<()> {
-    let (mut app, db) = helpers::create_test_app();
+    let (server, db) = helpers::create_test_server();
 
     let content_payload = json!({
         "url": "https://example.com/test-article",
@@ -75,16 +44,11 @@ async fn test_add_content_endpoint() -> Result<()> {
         "author": "Test Author"
     });
 
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(content_payload.to_string()))?;
+    let response = server.post("/content").json(&content_payload).await;
 
-    let (status, response) = helpers::make_request(&mut app, request).await?;
-
-    assert_eq!(status, StatusCode::OK);
-    assert!(response["id"].is_number());
+    response.assert_status_ok();
+    let json_response: Value = response.json();
+    assert!(json_response["id"].is_number());
 
     // Verify database state
     {
@@ -106,21 +70,15 @@ async fn test_add_content_endpoint() -> Result<()> {
 
 #[tokio::test]
 async fn test_add_content_minimal_payload() -> Result<()> {
-    let (mut app, db) = helpers::create_test_app();
+    let (server, db) = helpers::create_test_server();
 
     let content_payload = json!({
         "url": "https://example.com/minimal"
     });
 
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(content_payload.to_string()))?;
+    let response = server.post("/content").json(&content_payload).await;
 
-    let (status, _) = helpers::make_request(&mut app, request).await?;
-
-    assert_eq!(status, StatusCode::OK);
+    response.assert_status_ok();
 
     // Verify database state
     {
@@ -142,7 +100,7 @@ async fn test_add_content_minimal_payload() -> Result<()> {
 
 #[tokio::test]
 async fn test_multiple_content_items() -> Result<()> {
-    let (mut app, db) = helpers::create_test_app();
+    let (server, db) = helpers::create_test_server();
 
     // Add first item
     let first_payload = json!({
@@ -150,13 +108,7 @@ async fn test_multiple_content_items() -> Result<()> {
         "title": "First Article"
     });
 
-    let request1 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(first_payload.to_string()))?;
-
-    helpers::make_request(&mut app, request1).await?;
+    server.post("/content").json(&first_payload).await;
 
     // Add second item
     let second_payload = json!({
@@ -164,13 +116,7 @@ async fn test_multiple_content_items() -> Result<()> {
         "author": "Second Author"
     });
 
-    let request2 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(second_payload.to_string()))?;
-
-    helpers::make_request(&mut app, request2).await?;
+    server.post("/content").json(&second_payload).await;
 
     // Verify database state
     {
@@ -191,7 +137,7 @@ async fn test_multiple_content_items() -> Result<()> {
 
 #[tokio::test]
 async fn test_duplicate_url_handling() -> Result<()> {
-    let (mut app, db) = helpers::create_test_app();
+    let (server, db) = helpers::create_test_server();
 
     // Add first item
     let first_payload = json!({
@@ -200,15 +146,10 @@ async fn test_duplicate_url_handling() -> Result<()> {
         "author": "First Author"
     });
 
-    let request1 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(first_payload.to_string()))?;
-
-    let (status1, response1) = helpers::make_request(&mut app, request1).await?;
-    assert_eq!(status1, StatusCode::OK);
-    let _first_id = response1["id"].as_u64().unwrap();
+    let response1 = server.post("/content").json(&first_payload).await;
+    response1.assert_status_ok();
+    let json_response1: Value = response1.json();
+    let _first_id = json_response1["id"].as_u64().unwrap();
 
     // Attempt to add same URL again with different metadata
     let second_payload = json!({
@@ -217,16 +158,10 @@ async fn test_duplicate_url_handling() -> Result<()> {
         "author": "Second Author"
     });
 
-    let request2 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(second_payload.to_string()))?;
-
-    let (status2, _response2) = helpers::make_request(&mut app, request2).await?;
+    let response2 = server.post("/content").json(&second_payload).await;
 
     // Should return conflict error for different metadata
-    assert_eq!(status2, StatusCode::CONFLICT);
+    response2.assert_status(StatusCode::CONFLICT);
 
     // Verify only one record exists
     {
@@ -247,7 +182,7 @@ async fn test_duplicate_url_handling() -> Result<()> {
 
 #[tokio::test]
 async fn test_true_idempotent_behavior() -> Result<()> {
-    let (mut app, db) = helpers::create_test_app();
+    let (server, db) = helpers::create_test_server();
 
     // Add first item
     let payload = json!({
@@ -256,28 +191,18 @@ async fn test_true_idempotent_behavior() -> Result<()> {
         "author": "Same Author"
     });
 
-    let request1 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(payload.to_string()))?;
-
-    let (status1, response1) = helpers::make_request(&mut app, request1).await?;
-    assert_eq!(status1, StatusCode::OK);
-    let first_id = response1["id"].as_u64().unwrap();
+    let response1 = server.post("/content").json(&payload).await;
+    response1.assert_status_ok();
+    let json_response1: Value = response1.json();
+    let first_id = json_response1["id"].as_u64().unwrap();
 
     // Add same item again with identical metadata - should be idempotent
-    let request2 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(payload.to_string()))?;
-
-    let (status2, response2) = helpers::make_request(&mut app, request2).await?;
+    let response2 = server.post("/content").json(&payload).await;
 
     // Should return existing record (truly idempotent)
-    assert_eq!(status2, StatusCode::OK);
-    assert_eq!(response2["id"].as_u64().unwrap(), first_id);
+    response2.assert_status_ok();
+    let json_response2: Value = response2.json();
+    assert_eq!(json_response2["id"].as_u64().unwrap(), first_id);
 
     // Verify only one record exists
     {
@@ -290,7 +215,7 @@ async fn test_true_idempotent_behavior() -> Result<()> {
 
 #[tokio::test]
 async fn test_url_normalization() -> Result<()> {
-    let (mut app, db) = helpers::create_test_app();
+    let (server, db) = helpers::create_test_server();
 
     // Add URL with fragment and trailing slash
     let payload1 = json!({
@@ -298,15 +223,10 @@ async fn test_url_normalization() -> Result<()> {
         "title": "Test Article"
     });
 
-    let request1 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(payload1.to_string()))?;
-
-    let (status1, response1) = helpers::make_request(&mut app, request1).await?;
-    assert_eq!(status1, StatusCode::OK);
-    let first_id = response1["id"].as_u64().unwrap();
+    let response1 = server.post("/content").json(&payload1).await;
+    response1.assert_status_ok();
+    let json_response1: Value = response1.json();
+    let first_id = json_response1["id"].as_u64().unwrap();
 
     // Try same URL without fragment - should be treated as duplicate with same metadata
     let payload2 = json!({
@@ -314,15 +234,10 @@ async fn test_url_normalization() -> Result<()> {
         "title": "Test Article"
     });
 
-    let request2 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(payload2.to_string()))?;
-
-    let (status2, response2) = helpers::make_request(&mut app, request2).await?;
-    assert_eq!(status2, StatusCode::OK);
-    assert_eq!(response2["id"].as_u64().unwrap(), first_id);
+    let response2 = server.post("/content").json(&payload2).await;
+    response2.assert_status_ok();
+    let json_response2: Value = response2.json();
+    assert_eq!(json_response2["id"].as_u64().unwrap(), first_id);
 
     // Verify only one record and URL is normalized
     {
@@ -341,7 +256,7 @@ async fn test_url_normalization() -> Result<()> {
 
 #[tokio::test]
 async fn test_invalid_url_rejection() -> Result<()> {
-    let (mut app, _db) = helpers::create_test_app();
+    let (server, _db) = helpers::create_test_server();
 
     let test_cases = vec![
         ("", "empty URL"),
@@ -357,61 +272,47 @@ async fn test_invalid_url_rejection() -> Result<()> {
             "title": format!("Test case: {}", description)
         });
 
-        let request = Request::builder()
-            .method(Method::POST)
-            .uri("/content")
-            .header("content-type", "application/json")
-            .body(Body::from(payload.to_string()))?;
-
-        let (status, _) = helpers::make_request(&mut app, request).await?;
+        let response = server.post("/content").json(&payload).await;
 
         // Should reject with 400 Bad Request
-        assert_eq!(
-            status,
-            StatusCode::BAD_REQUEST,
-            "Expected BAD_REQUEST for: {description}"
-        );
+        response.assert_status(StatusCode::BAD_REQUEST);
     }
     Ok(())
 }
 
 #[tokio::test]
 async fn test_invalid_content_type() -> Result<()> {
-    let (mut app, _db) = helpers::create_test_app();
+    let (server, _db) = helpers::create_test_server();
 
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "text/plain") // Wrong content type
-        .body(Body::from(r#"{"url": "https://example.com"}"#))?;
-
-    let (status, _) = helpers::make_request(&mut app, request).await?;
+    let response = server
+        .post("/content")
+        .content_type("text/plain") // Wrong content type
+        .text(r#"{"url": "https://example.com"}"#)
+        .await;
 
     // Axum should reject non-JSON content types
-    assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    response.assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
     Ok(())
 }
 
 #[tokio::test]
 async fn test_missing_content_type() -> Result<()> {
-    let (mut app, _db) = helpers::create_test_app();
+    let (server, _db) = helpers::create_test_server();
 
-    let request = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
+    let response = server
+        .post("/content")
         // No content-type header
-        .body(Body::from(r#"{"url": "https://example.com"}"#))?;
-
-    let (status, _) = helpers::make_request(&mut app, request).await?;
+        .text(r#"{"url": "https://example.com"}"#)
+        .await;
 
     // Axum should reject missing content types for JSON extraction
-    assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    response.assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
     Ok(())
 }
 
 #[tokio::test]
 async fn test_url_with_query_parameters() -> Result<()> {
-    let (mut app, db) = helpers::create_test_app();
+    let (server, db) = helpers::create_test_server();
 
     // URLs with different query parameter orders should normalize to same URL
     let payload1 = json!({
@@ -419,15 +320,10 @@ async fn test_url_with_query_parameters() -> Result<()> {
         "title": "Search Results"
     });
 
-    let request1 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(payload1.to_string()))?;
-
-    let (status1, response1) = helpers::make_request(&mut app, request1).await?;
-    assert_eq!(status1, StatusCode::OK);
-    let first_id = response1["id"].as_u64().unwrap();
+    let response1 = server.post("/content").json(&payload1).await;
+    response1.assert_status_ok();
+    let json_response1: Value = response1.json();
+    let first_id = json_response1["id"].as_u64().unwrap();
 
     // Same parameters in different order with same metadata
     let payload2 = json!({
@@ -435,15 +331,10 @@ async fn test_url_with_query_parameters() -> Result<()> {
         "title": "Search Results"
     });
 
-    let request2 = Request::builder()
-        .method(Method::POST)
-        .uri("/content")
-        .header("content-type", "application/json")
-        .body(Body::from(payload2.to_string()))?;
-
-    let (status2, response2) = helpers::make_request(&mut app, request2).await?;
-    assert_eq!(status2, StatusCode::OK);
-    assert_eq!(response2["id"].as_u64().unwrap(), first_id);
+    let response2 = server.post("/content").json(&payload2).await;
+    response2.assert_status_ok();
+    let json_response2: Value = response2.json();
+    assert_eq!(json_response2["id"].as_u64().unwrap(), first_id);
 
     // Verify only one record
     {
