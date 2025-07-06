@@ -9,6 +9,7 @@ edition.workspace = true
 test-helpers = []
 
 [dependencies]
+async-trait = "0.1.88"
 axum = "0.8.4"
 chrono = { version = "0.4.41", features = ["serde"] }
 diesel = { version = "2.2.11", features = [

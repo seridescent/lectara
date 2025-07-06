@@ -14,13 +14,13 @@ mod common;
 mod helpers {
     use super::*;
     use crate::common::establish_test_connection;
-    use lectara_service::{AppState, create_app};
+    use lectara_service::{DefaultAppState, create_app};
 
     pub fn create_test_app() -> (Router, Arc<Mutex<diesel::sqlite::SqliteConnection>>) {
         let connection = establish_test_connection();
         let db = Arc::new(Mutex::new(connection));
 
-        let state = AppState { db: db.clone() };
+        let state = DefaultAppState::new(db.clone());
 
         let app = create_app(state);
         (app, db)
