@@ -16,6 +16,12 @@ pub struct ShutdownState {
     in_flight_count: Arc<AtomicUsize>,
 }
 
+impl Default for ShutdownState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShutdownState {
     /// Create a new shutdown state
     pub fn new() -> Self {
@@ -158,12 +164,53 @@ mod tests {
     use super::*;
     use bytes::Bytes;
     use http_body_util::Empty;
+    use std::sync::Arc;
     use std::time::Duration;
+    use tokio::sync::{Barrier, Notify};
     use tower::{ServiceBuilder, ServiceExt};
 
-    /// A simple echo service for testing
+    // Test timing constants
+    const FAST_DELAY: Duration = Duration::from_millis(10);
+    const COORDINATION_TIMEOUT: Duration = Duration::from_secs(5);
+
+    /// Helper for deterministic delays in tests
+    async fn test_delay(duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+
+    /// A configurable echo service for testing
     #[derive(Clone)]
-    struct EchoService;
+    struct EchoService {
+        delay: Duration,
+        start_notify: Option<Arc<Notify>>,
+        complete_notify: Option<Arc<Notify>>,
+    }
+
+    impl EchoService {
+        fn new() -> Self {
+            Self {
+                delay: FAST_DELAY,
+                start_notify: None,
+                complete_notify: None,
+            }
+        }
+
+        fn with_delay(delay: Duration) -> Self {
+            Self {
+                delay,
+                start_notify: None,
+                complete_notify: None,
+            }
+        }
+
+        fn with_notifications(start_notify: Arc<Notify>, complete_notify: Arc<Notify>) -> Self {
+            Self {
+                delay: FAST_DELAY,
+                start_notify: Some(start_notify),
+                complete_notify: Some(complete_notify),
+            }
+        }
+    }
 
     impl Service<Request<Empty<Bytes>>> for EchoService {
         type Response = Response<Empty<Bytes>>;
@@ -175,9 +222,24 @@ mod tests {
         }
 
         fn call(&mut self, _req: Request<Empty<Bytes>>) -> Self::Future {
-            Box::pin(async {
-                // Simulate some work
-                tokio::time::sleep(Duration::from_millis(10)).await;
+            let delay = self.delay;
+            let start_notify = self.start_notify.clone();
+            let complete_notify = self.complete_notify.clone();
+
+            Box::pin(async move {
+                // Notify test that request started
+                if let Some(notify) = start_notify {
+                    notify.notify_one();
+                }
+
+                // Simulate work
+                test_delay(delay).await;
+
+                // Notify test that request completed
+                if let Some(notify) = complete_notify {
+                    notify.notify_one();
+                }
+
                 Ok(Response::new(Empty::new()))
             })
         }
@@ -188,7 +250,7 @@ mod tests {
         let state = ShutdownState::new();
         let service = ServiceBuilder::new()
             .layer(GracefulShutdownLayer::new(state.clone()))
-            .service(EchoService);
+            .service(EchoService::new());
 
         // Normal request should go through
         let req = Request::builder().body(Empty::new()).unwrap();
@@ -204,7 +266,7 @@ mod tests {
         let state = ShutdownState::new();
         let service = ServiceBuilder::new()
             .layer(GracefulShutdownLayer::new(state.clone()))
-            .service(EchoService);
+            .service(EchoService::new());
 
         // Start shutdown
         state.start_shutdown();
@@ -221,23 +283,39 @@ mod tests {
     #[tokio::test]
     async fn test_tracks_in_flight_requests() {
         let state = ShutdownState::new();
+        let start_barrier = Arc::new(Barrier::new(4)); // 3 requests + 1 test
+        let complete_barrier = Arc::new(Barrier::new(4)); // 3 requests + 1 test
+
         let service = ServiceBuilder::new()
             .layer(GracefulShutdownLayer::new(state.clone()))
-            .service(EchoService);
+            .service(EchoService::with_delay(Duration::from_millis(50))); // Longer delay for coordination
 
         // Start multiple requests
         let mut handles = vec![];
         for _ in 0..3 {
             let req = Request::builder().body(Empty::new()).unwrap();
             let svc = service.clone();
-            handles.push(tokio::spawn(async move { svc.oneshot(req).await }));
+            let start_barrier = start_barrier.clone();
+            let complete_barrier = complete_barrier.clone();
+
+            handles.push(tokio::spawn(async move {
+                // Wait for all requests to start
+                start_barrier.wait().await;
+                let result = svc.oneshot(req).await;
+                // Wait for test to check in-flight count
+                complete_barrier.wait().await;
+                result
+            }));
         }
 
-        // Give requests time to start
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        // Wait for all requests to start
+        start_barrier.wait().await;
 
         // Should have 3 in-flight requests
         assert_eq!(state.in_flight_count(), 3);
+
+        // Signal requests to complete
+        complete_barrier.wait().await;
 
         // Wait for all to complete
         for handle in handles {
@@ -251,9 +329,15 @@ mod tests {
     #[tokio::test]
     async fn test_graceful_shutdown_flow() {
         let state = ShutdownState::new();
+        let start_notify = Arc::new(Notify::new());
+        let complete_notify = Arc::new(Notify::new());
+
         let service = ServiceBuilder::new()
             .layer(GracefulShutdownLayer::new(state.clone()))
-            .service(EchoService);
+            .service(EchoService::with_notifications(
+                start_notify.clone(),
+                complete_notify.clone(),
+            ));
 
         // Start a request
         let req1 = Request::builder().body(Empty::new()).unwrap();
@@ -262,8 +346,10 @@ mod tests {
             async move { svc.oneshot(req1).await }
         });
 
-        // Let it start
-        tokio::time::sleep(Duration::from_millis(5)).await;
+        // Wait for request to start
+        tokio::time::timeout(COORDINATION_TIMEOUT, start_notify.notified())
+            .await
+            .expect("Request should start within timeout");
         assert_eq!(state.in_flight_count(), 1);
 
         // Start shutdown
@@ -284,45 +370,92 @@ mod tests {
 
     #[tokio::test]
     async fn test_concurrent_shutdown_and_requests() {
+        // Test count constants
+        const PRE_SHUTDOWN_REQUESTS: usize = 5;
+        const POST_SHUTDOWN_REQUESTS: usize = 5;
+        const TOTAL_REQUESTS: usize = PRE_SHUTDOWN_REQUESTS + POST_SHUTDOWN_REQUESTS;
+
         let state = ShutdownState::new();
+        let start_notifications: Vec<Arc<Notify>> = (0..PRE_SHUTDOWN_REQUESTS)
+            .map(|_| Arc::new(Notify::new()))
+            .collect();
+
         let service = ServiceBuilder::new()
             .layer(GracefulShutdownLayer::new(state.clone()))
-            .service(EchoService);
+            .service(EchoService::with_delay(Duration::from_millis(50)));
 
-        // Start many requests concurrently
-        let mut handles = vec![];
-        for i in 0..10 {
+        // Start pre-shutdown requests with individual notifications
+        let mut pre_shutdown_handles = vec![];
+        for start_notify in &start_notifications {
+            let req = Request::builder().body(Empty::new()).unwrap();
+            let start_notify = start_notify.clone();
+            let complete_notify = Arc::new(Notify::new());
+
+            let echo_service = EchoService::with_notifications(start_notify, complete_notify);
+            let service_with_notify = ServiceBuilder::new()
+                .layer(GracefulShutdownLayer::new(state.clone()))
+                .service(echo_service);
+
+            pre_shutdown_handles.push(tokio::spawn(async move {
+                service_with_notify.oneshot(req).await
+            }));
+        }
+
+        // Wait for all pre-shutdown requests to start
+        for start_notify in &start_notifications {
+            tokio::time::timeout(COORDINATION_TIMEOUT, start_notify.notified())
+                .await
+                .expect("Request should start within timeout");
+        }
+
+        // Verify all requests are in-flight
+        assert_eq!(state.in_flight_count(), PRE_SHUTDOWN_REQUESTS);
+
+        // Start shutdown
+        state.start_shutdown();
+
+        // Start post-shutdown requests (these should be rejected immediately)
+        let mut post_shutdown_handles = vec![];
+        for _ in 0..POST_SHUTDOWN_REQUESTS {
             let req = Request::builder().body(Empty::new()).unwrap();
             let svc = service.clone();
-            let shutdown_state = state.clone();
-
-            handles.push(tokio::spawn(async move {
-                // Half the requests will trigger shutdown
-                if i == 5 {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                    shutdown_state.start_shutdown();
-                }
-                svc.oneshot(req).await
-            }));
+            post_shutdown_handles.push(tokio::spawn(async move { svc.oneshot(req).await }));
         }
 
         // Collect results
         let mut ok_count = 0;
         let mut unavailable_count = 0;
 
-        for handle in handles {
+        // Pre-shutdown requests should ALL succeed (they were in-flight before shutdown)
+        for handle in pre_shutdown_handles {
             let result = handle.await.unwrap().unwrap();
             match result.status() {
                 StatusCode::OK => ok_count += 1,
                 StatusCode::SERVICE_UNAVAILABLE => unavailable_count += 1,
-                _ => panic!("Unexpected status"),
+                _ => panic!("Unexpected status: {}", result.status()),
             }
         }
 
-        // Should have some successful and some rejected
-        assert!(ok_count > 0, "Should have some successful requests");
-        assert!(unavailable_count > 0, "Should have some rejected requests");
-        assert_eq!(ok_count + unavailable_count, 10);
+        // Post-shutdown requests should ALL be rejected
+        for handle in post_shutdown_handles {
+            let result = handle.await.unwrap().unwrap();
+            match result.status() {
+                StatusCode::OK => ok_count += 1,
+                StatusCode::SERVICE_UNAVAILABLE => unavailable_count += 1,
+                _ => panic!("Unexpected status: {}", result.status()),
+            }
+        }
+
+        // Verify exact counts
+        assert_eq!(
+            ok_count, PRE_SHUTDOWN_REQUESTS,
+            "All pre-shutdown requests should succeed"
+        );
+        assert_eq!(
+            unavailable_count, POST_SHUTDOWN_REQUESTS,
+            "All post-shutdown requests should be rejected"
+        );
+        assert_eq!(ok_count + unavailable_count, TOTAL_REQUESTS);
 
         // All done
         assert_eq!(state.in_flight_count(), 0);
