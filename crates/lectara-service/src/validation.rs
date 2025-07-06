@@ -6,12 +6,16 @@ use url::Url;
 
 #[derive(Error, Debug)]
 pub enum ValidationError {
-    #[error("Invalid URL format: {0}")]
-    InvalidUrl(String),
-    #[error("Unsupported URL scheme: {0}")]
-    UnsupportedScheme(String),
     #[error("URL cannot be empty")]
     EmptyUrl,
+    #[error("Malformed URL: {0}")]
+    MalformedUrl(String),
+    #[error("URL must have a host")]
+    MissingHost,
+    #[error("Local addresses not allowed: {0}")]
+    LocalAddress(String),
+    #[error("Unsupported URL scheme: {0}")]
+    UnsupportedScheme(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -92,15 +96,11 @@ impl TryFrom<Url> for ValidatedUrl {
         };
 
         // Must have a host for internet content
-        let host = url
-            .host_str()
-            .ok_or_else(|| ValidationError::InvalidUrl("URL must have a host".to_string()))?;
+        let host = url.host_str().ok_or(ValidationError::MissingHost)?;
 
         // Host cannot be empty
         if host.is_empty() {
-            return Err(ValidationError::InvalidUrl(
-                "Host cannot be empty".to_string(),
-            ));
+            return Err(ValidationError::MissingHost);
         }
 
         // Normalize host to lowercase and check for local addresses
@@ -110,9 +110,7 @@ impl TryFrom<Url> for ValidatedUrl {
             || host.starts_with("192.168.")
             || host.starts_with("10.")
         {
-            return Err(ValidationError::InvalidUrl(
-                "Local addresses not allowed".to_string(),
-            ));
+            return Err(ValidationError::LocalAddress(host));
         }
 
         // Normalize port (remove default ports)
@@ -165,7 +163,8 @@ pub fn validate_url(url_str: &str) -> Result<ValidatedUrl, ValidationError> {
         return Err(ValidationError::EmptyUrl);
     }
 
-    let url = Url::parse(url_str).map_err(|_| ValidationError::InvalidUrl(url_str.to_string()))?;
+    let url =
+        Url::parse(url_str).map_err(|_| ValidationError::MalformedUrl(url_str.to_string()))?;
     ValidatedUrl::try_from(url)
 }
 
@@ -178,55 +177,134 @@ pub fn normalize_url(url_str: &str) -> Result<String, ValidationError> {
 mod tests {
     use super::*;
 
+    // Valid URL tests
     #[test]
-    fn test_validate_url_valid() {
-        let valid_urls = vec![
-            "https://example.com",
-            "http://example.com",
-            "https://example.com/path",
-            "https://example.com/path?query=value",
-            "https://subdomain.example.com",
-            "https://example.com:8080/path",
-        ];
-
-        for url in valid_urls {
-            assert!(validate_url(url).is_ok(), "URL should be valid: {url}");
-        }
+    fn test_validate_https_url() {
+        assert!(validate_url("https://example.com").is_ok());
     }
 
     #[test]
-    fn test_validate_url_invalid() {
-        let invalid_urls = vec![
-            ("", ValidationError::EmptyUrl),
-            (
-                "not-a-url",
-                ValidationError::InvalidUrl("not-a-url".to_string()),
-            ),
-            (
-                "ftp://example.com",
-                ValidationError::UnsupportedScheme("ftp".to_string()),
-            ),
-            (
-                "javascript:alert('xss')",
-                ValidationError::UnsupportedScheme("javascript".to_string()),
-            ),
-        ];
-
-        for (url, expected_error_type) in invalid_urls {
-            let result = validate_url(url);
-            assert!(result.is_err(), "URL should be invalid: {url}");
-
-            match (&result.unwrap_err(), &expected_error_type) {
-                (ValidationError::EmptyUrl, ValidationError::EmptyUrl) => {}
-                (ValidationError::InvalidUrl(_), ValidationError::InvalidUrl(_)) => {}
-                (ValidationError::UnsupportedScheme(_), ValidationError::UnsupportedScheme(_)) => {}
-                _ => panic!("Unexpected error type for URL: {url}"),
-            }
-        }
+    fn test_validate_http_url() {
+        assert!(validate_url("http://example.com").is_ok());
     }
 
     #[test]
-    fn test_normalize_url_fragments() {
+    fn test_validate_url_with_path() {
+        assert!(validate_url("https://example.com/path").is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_with_query() {
+        assert!(validate_url("https://example.com/path?query=value").is_ok());
+    }
+
+    #[test]
+    fn test_validate_subdomain_url() {
+        assert!(validate_url("https://subdomain.example.com").is_ok());
+    }
+
+    #[test]
+    fn test_validate_url_with_non_default_port() {
+        assert!(validate_url("https://example.com:8080/path").is_ok());
+    }
+
+    // Invalid URL tests with specific error type checking
+    #[test]
+    fn test_empty_url_returns_empty_error() {
+        assert!(matches!(validate_url(""), Err(ValidationError::EmptyUrl)));
+    }
+
+    #[test]
+    fn test_malformed_url_returns_malformed_error() {
+        assert!(matches!(
+            validate_url("not-a-url"),
+            Err(ValidationError::MalformedUrl(_))
+        ));
+    }
+
+    #[test]
+    fn test_ftp_scheme_returns_unsupported_error() {
+        assert!(matches!(
+            validate_url("ftp://example.com"),
+            Err(ValidationError::UnsupportedScheme(_))
+        ));
+    }
+
+    #[test]
+    fn test_javascript_scheme_returns_unsupported_error() {
+        assert!(matches!(
+            validate_url("javascript:alert('xss')"),
+            Err(ValidationError::UnsupportedScheme(_))
+        ));
+    }
+
+    #[test]
+    fn test_data_scheme_returns_unsupported_error() {
+        assert!(matches!(
+            validate_url("data:text/html,<script>alert('xss')</script>"),
+            Err(ValidationError::UnsupportedScheme(_))
+        ));
+    }
+
+    #[test]
+    fn test_https_without_host_returns_malformed_error() {
+        assert!(matches!(
+            validate_url("https://"),
+            Err(ValidationError::MalformedUrl(_))
+        ));
+    }
+
+    #[test]
+    fn test_http_without_host_returns_malformed_error() {
+        assert!(matches!(
+            validate_url("http://"),
+            Err(ValidationError::MalformedUrl(_))
+        ));
+    }
+
+    #[test]
+    fn test_url_without_scheme_returns_malformed_error() {
+        assert!(matches!(
+            validate_url("://example.com"),
+            Err(ValidationError::MalformedUrl(_))
+        ));
+    }
+
+    #[test]
+    fn test_localhost_returns_local_address_error() {
+        assert!(matches!(
+            validate_url("https://localhost/path"),
+            Err(ValidationError::LocalAddress(_))
+        ));
+    }
+
+    #[test]
+    fn test_loopback_ip_returns_local_address_error() {
+        assert!(matches!(
+            validate_url("http://127.0.0.1/test"),
+            Err(ValidationError::LocalAddress(_))
+        ));
+    }
+
+    #[test]
+    fn test_private_ip_192_returns_local_address_error() {
+        assert!(matches!(
+            validate_url("https://192.168.1.1/local"),
+            Err(ValidationError::LocalAddress(_))
+        ));
+    }
+
+    #[test]
+    fn test_private_ip_10_returns_local_address_error() {
+        assert!(matches!(
+            validate_url("http://10.0.0.1/internal"),
+            Err(ValidationError::LocalAddress(_))
+        ));
+    }
+
+    // Fragment normalization tests
+    #[test]
+    fn test_normalize_url_removes_fragment() {
         assert_eq!(
             normalize_url("https://example.com/path#fragment").unwrap(),
             "https://example.com/path"
@@ -234,25 +312,41 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_url_trailing_slash() {
+    fn test_normalize_url_removes_fragment_with_trailing_slash() {
+        assert_eq!(
+            normalize_url("https://example.com/path/#fragment").unwrap(),
+            "https://example.com/path"
+        );
+    }
+
+    // Trailing slash normalization tests
+    #[test]
+    fn test_normalize_url_removes_trailing_slash_from_path() {
         assert_eq!(
             normalize_url("https://example.com/path/").unwrap(),
             "https://example.com/path"
         );
+    }
 
+    #[test]
+    fn test_normalize_url_preserves_root_slash() {
         assert_eq!(
             normalize_url("https://example.com/").unwrap(),
             "https://example.com/"
         );
+    }
 
+    #[test]
+    fn test_normalize_url_adds_root_slash_when_missing() {
         assert_eq!(
             normalize_url("https://example.com").unwrap(),
             "https://example.com/"
         );
     }
 
+    // Query parameter normalization tests
     #[test]
-    fn test_normalize_url_query_params() {
+    fn test_normalize_url_sorts_query_params() {
         assert_eq!(
             normalize_url("https://example.com/search?c=3&a=1&b=2").unwrap(),
             "https://example.com/search?a=1&b=2&c=3"
@@ -260,42 +354,82 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_url_case_sensitivity() {
+    fn test_normalize_url_preserves_empty_query_params() {
+        assert_eq!(
+            normalize_url("https://example.com/search?a=1&b=&c=3").unwrap(),
+            "https://example.com/search?a=1&b&c=3"
+        );
+    }
+
+    // Case sensitivity normalization tests
+    #[test]
+    fn test_normalize_url_lowercases_domain_preserves_path_case() {
         assert_eq!(
             normalize_url("https://EXAMPLE.COM/Path/To/Resource").unwrap(),
             "https://example.com/Path/To/Resource"
         );
     }
 
+    // Port normalization tests
     #[test]
-    fn test_normalize_url_default_ports() {
+    fn test_normalize_url_removes_default_https_port() {
         assert_eq!(
             normalize_url("https://example.com:443/path").unwrap(),
             "https://example.com/path"
         );
+    }
 
+    #[test]
+    fn test_normalize_url_removes_default_http_port() {
         assert_eq!(
             normalize_url("http://example.com:80/path").unwrap(),
             "http://example.com/path"
         );
+    }
 
+    #[test]
+    fn test_normalize_url_preserves_non_default_port() {
         assert_eq!(
             normalize_url("https://example.com:8080/path").unwrap(),
             "https://example.com:8080/path"
         );
     }
 
+    // Percent encoding normalization tests
+    #[test]
+    fn test_normalize_url_preserves_percent_encoding_in_path() {
+        assert_eq!(
+            normalize_url("https://example.com/path%20with%20spaces").unwrap(),
+            "https://example.com/path%20with%20spaces"
+        );
+    }
+
+    #[test]
+    fn test_normalize_url_decodes_query_parameters() {
+        assert_eq!(
+            normalize_url("https://example.com/search?q=hello%20world").unwrap(),
+            "https://example.com/search?q=hello world"
+        );
+    }
+
+    // Complex normalization test
+    #[test]
+    fn test_complex_url_normalization() {
+        let complex_url = "HTTPS://EXAMPLE.COM:443/Path/To/Resource/?c=3&a=1&b=2#fragment";
+        let expected = "https://example.com/Path/To/Resource?a=1&b=2&c=3";
+        assert_eq!(normalize_url(complex_url).unwrap(), expected);
+    }
+
+    // ValidatedUrl type safety tests
     #[test]
     fn test_validated_url_type_safety() {
-        // Test that ValidatedUrl guarantees valid state
         let validated = validate_url("https://EXAMPLE.COM:443/Path/?c=3&a=1#fragment").unwrap();
 
-        // The type guarantees these properties
         assert_eq!(validated.scheme, Scheme::Https);
-        assert_eq!(validated.host, "example.com"); // normalized to lowercase
-        assert_eq!(validated.port, None); // default port removed
-        assert_eq!(validated.path, "/Path"); // trailing slash removed, fragment gone
-        // Query should be stored as structured data, sorted
+        assert_eq!(validated.host, "example.com");
+        assert_eq!(validated.port, None);
+        assert_eq!(validated.path, "/Path");
+
         let expected_query = {
             let mut map = BTreeMap::new();
             map.insert("a".to_string(), "1".to_string());
@@ -303,27 +437,21 @@ mod tests {
             Some(map)
         };
         assert_eq!(validated.query, expected_query);
-
-        // Converting to string gives normalized URL
         assert_eq!(validated.to_string(), "https://example.com/Path?a=1&c=3");
     }
 
     #[test]
     fn test_try_from_trait() {
-        // Test the TryFrom<Url> trait implementation
         let url = Url::parse("https://example.com/test?b=2&a=1").unwrap();
         let validated = ValidatedUrl::try_from(url).unwrap();
 
         assert_eq!(validated.host, "example.com");
         assert_eq!(validated.path, "/test");
 
-        // Query parameters should be stored as BTreeMap (automatically sorted)
         let mut expected_params = BTreeMap::new();
         expected_params.insert("a".to_string(), "1".to_string());
         expected_params.insert("b".to_string(), "2".to_string());
         assert_eq!(validated.query, Some(expected_params));
-
-        // Display should show sorted parameters
         assert_eq!(validated.to_string(), "https://example.com/test?a=1&b=2");
     }
 }
