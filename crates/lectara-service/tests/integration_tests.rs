@@ -9,29 +9,18 @@ mod common;
 mod helpers {
     use super::*;
     use crate::common::establish_test_connection;
-    use lectara_service::{DefaultAppState, create_app};
+    use lectara_service::{DefaultAppState, routes};
 
     pub fn create_test_server() -> (TestServer, Arc<Mutex<diesel::sqlite::SqliteConnection>>) {
         let connection = establish_test_connection();
         let db = Arc::new(Mutex::new(connection));
 
         let state = DefaultAppState::new(db.clone());
-        let app = create_app(state);
+        let app = routes::create_router().with_state(state);
 
         let server = TestServer::new(app).unwrap();
         (server, db)
     }
-}
-
-#[tokio::test]
-async fn test_health_endpoint() -> Result<()> {
-    let (server, _db) = helpers::create_test_server();
-
-    let response = server.get("/health").await;
-
-    response.assert_status_ok();
-    assert_eq!(response.text(), "OK");
-    Ok(())
 }
 
 #[tokio::test]
@@ -44,7 +33,7 @@ async fn test_add_content_endpoint() -> Result<()> {
         "author": "Test Author"
     });
 
-    let response = server.post("/content").json(&content_payload).await;
+    let response = server.post("/api/v1/content").json(&content_payload).await;
 
     response.assert_status_ok();
     let json_response: Value = response.json();
@@ -76,7 +65,7 @@ async fn test_add_content_minimal_payload() -> Result<()> {
         "url": "https://example.com/minimal"
     });
 
-    let response = server.post("/content").json(&content_payload).await;
+    let response = server.post("/api/v1/content").json(&content_payload).await;
 
     response.assert_status_ok();
 
@@ -108,7 +97,7 @@ async fn test_multiple_content_items() -> Result<()> {
         "title": "First Article"
     });
 
-    server.post("/content").json(&first_payload).await;
+    server.post("/api/v1/content").json(&first_payload).await;
 
     // Add second item
     let second_payload = json!({
@@ -116,7 +105,7 @@ async fn test_multiple_content_items() -> Result<()> {
         "author": "Second Author"
     });
 
-    server.post("/content").json(&second_payload).await;
+    server.post("/api/v1/content").json(&second_payload).await;
 
     // Verify database state
     {
@@ -146,7 +135,7 @@ async fn test_duplicate_url_handling() -> Result<()> {
         "author": "First Author"
     });
 
-    let response1 = server.post("/content").json(&first_payload).await;
+    let response1 = server.post("/api/v1/content").json(&first_payload).await;
     response1.assert_status_ok();
     let json_response1: Value = response1.json();
     let _first_id = json_response1["id"].as_u64().unwrap();
@@ -158,7 +147,7 @@ async fn test_duplicate_url_handling() -> Result<()> {
         "author": "Second Author"
     });
 
-    let response2 = server.post("/content").json(&second_payload).await;
+    let response2 = server.post("/api/v1/content").json(&second_payload).await;
 
     // Should return conflict error for different metadata
     response2.assert_status(StatusCode::CONFLICT);
@@ -191,13 +180,13 @@ async fn test_true_idempotent_behavior() -> Result<()> {
         "author": "Same Author"
     });
 
-    let response1 = server.post("/content").json(&payload).await;
+    let response1 = server.post("/api/v1/content").json(&payload).await;
     response1.assert_status_ok();
     let json_response1: Value = response1.json();
     let first_id = json_response1["id"].as_u64().unwrap();
 
     // Add same item again with identical metadata - should be idempotent
-    let response2 = server.post("/content").json(&payload).await;
+    let response2 = server.post("/api/v1/content").json(&payload).await;
 
     // Should return existing record (truly idempotent)
     response2.assert_status_ok();
@@ -223,7 +212,7 @@ async fn test_url_normalization() -> Result<()> {
         "title": "Test Article"
     });
 
-    let response1 = server.post("/content").json(&payload1).await;
+    let response1 = server.post("/api/v1/content").json(&payload1).await;
     response1.assert_status_ok();
     let json_response1: Value = response1.json();
     let first_id = json_response1["id"].as_u64().unwrap();
@@ -234,7 +223,7 @@ async fn test_url_normalization() -> Result<()> {
         "title": "Test Article"
     });
 
-    let response2 = server.post("/content").json(&payload2).await;
+    let response2 = server.post("/api/v1/content").json(&payload2).await;
     response2.assert_status_ok();
     let json_response2: Value = response2.json();
     assert_eq!(json_response2["id"].as_u64().unwrap(), first_id);
@@ -272,7 +261,7 @@ async fn test_invalid_url_rejection() -> Result<()> {
             "title": format!("Test case: {}", description)
         });
 
-        let response = server.post("/content").json(&payload).await;
+        let response = server.post("/api/v1/content").json(&payload).await;
 
         // Should reject with 400 Bad Request
         response.assert_status(StatusCode::BAD_REQUEST);
@@ -285,7 +274,7 @@ async fn test_invalid_content_type() -> Result<()> {
     let (server, _db) = helpers::create_test_server();
 
     let response = server
-        .post("/content")
+        .post("/api/v1/content")
         .content_type("text/plain") // Wrong content type
         .text(r#"{"url": "https://example.com"}"#)
         .await;
@@ -300,7 +289,7 @@ async fn test_missing_content_type() -> Result<()> {
     let (server, _db) = helpers::create_test_server();
 
     let response = server
-        .post("/content")
+        .post("/api/v1/content")
         // No content-type header
         .text(r#"{"url": "https://example.com"}"#)
         .await;
@@ -320,7 +309,7 @@ async fn test_url_with_query_parameters() -> Result<()> {
         "title": "Search Results"
     });
 
-    let response1 = server.post("/content").json(&payload1).await;
+    let response1 = server.post("/api/v1/content").json(&payload1).await;
     response1.assert_status_ok();
     let json_response1: Value = response1.json();
     let first_id = json_response1["id"].as_u64().unwrap();
@@ -331,7 +320,7 @@ async fn test_url_with_query_parameters() -> Result<()> {
         "title": "Search Results"
     });
 
-    let response2 = server.post("/content").json(&payload2).await;
+    let response2 = server.post("/api/v1/content").json(&payload2).await;
     response2.assert_status_ok();
     let json_response2: Value = response2.json();
     assert_eq!(json_response2["id"].as_u64().unwrap(), first_id);

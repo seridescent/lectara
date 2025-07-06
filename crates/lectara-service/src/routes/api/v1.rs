@@ -2,7 +2,7 @@ use axum::{
     Router,
     extract::{Json, State},
     response::Json as ResponseJson,
-    routing::{get, post},
+    routing::post,
 };
 use serde::Serialize;
 use tracing::{debug, info, instrument, warn};
@@ -21,10 +21,6 @@ struct CreateContentRequest {
 #[derive(Debug, Serialize)]
 struct ContentResponse {
     id: u32,
-}
-
-async fn health() -> &'static str {
-    "OK"
 }
 
 #[instrument(skip(state), fields(url = %payload.url, has_title = payload.title.is_some(), has_author = payload.author.is_some()))]
@@ -79,8 +75,6 @@ async fn add_content<S: AppState>(
     Ok(ResponseJson(response))
 }
 
-pub fn create_router<S: AppState>() -> Router<S> {
-    Router::new()
-        .route("/health", get(health))
-        .route("/content", post(add_content::<S>))
+pub fn create_api_v1_router<S: AppState>() -> Router<S> {
+    Router::new().route("/content", post(add_content::<S>))
 }

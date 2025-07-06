@@ -1,4 +1,3 @@
-use axum::Router;
 use diesel::sqlite::SqliteConnection;
 use std::sync::{Arc, Mutex};
 
@@ -42,8 +41,4 @@ impl AppState for DefaultAppState {
     fn content_repo(&self) -> Self::ContentRepo {
         self.content_repository.clone()
     }
-}
-
-pub fn create_app<S: AppState>(state: S) -> Router {
-    routes::create_router().with_state(state)
 }
