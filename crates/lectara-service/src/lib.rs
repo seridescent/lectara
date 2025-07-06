@@ -10,10 +10,12 @@ pub mod shutdown;
 pub mod validation;
 
 #[derive(Clone)]
-pub struct AppState {
+pub struct PocAppState {
     pub db: Arc<Mutex<SqliteConnection>>,
 }
 
-pub fn create_app(state: AppState) -> Router {
+pub trait AppState: Clone + Send + Sync + 'static {}
+
+pub fn create_app(state: PocAppState) -> Router {
     routes::create_router().with_state(state)
 }

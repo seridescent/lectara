@@ -8,7 +8,7 @@ use diesel::prelude::*;
 use serde::Serialize;
 use tracing::{debug, info, instrument, warn};
 
-use crate::AppState;
+use crate::PocAppState;
 use crate::errors::ApiError;
 use crate::models;
 
@@ -30,7 +30,7 @@ async fn health() -> &'static str {
 
 #[instrument(skip(state), fields(url = %payload.url, has_title = payload.title.is_some(), has_author = payload.author.is_some()))]
 async fn add_content(
-    State(state): State<AppState>,
+    State(state): State<PocAppState>,
     Json(payload): Json<CreateContentRequest>,
 ) -> Result<ResponseJson<ContentResponse>, ApiError> {
     use crate::schema::content_items;
@@ -88,7 +88,7 @@ async fn add_content(
     Ok(ResponseJson(response))
 }
 
-pub fn create_router() -> Router<AppState> {
+pub fn create_router() -> Router<PocAppState> {
     Router::new()
         .route("/health", get(health))
         .route("/content", post(add_content))
