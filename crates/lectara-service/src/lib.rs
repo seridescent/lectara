@@ -44,6 +44,6 @@ impl AppState for DefaultAppState {
     }
 }
 
-pub fn create_app(state: PocAppState) -> Router {
+pub fn create_app<S: AppState>(state: S) -> Router {
     routes::create_router().with_state(state)
 }

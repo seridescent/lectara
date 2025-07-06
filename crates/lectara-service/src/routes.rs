@@ -4,13 +4,12 @@ use axum::{
     response::Json as ResponseJson,
     routing::{get, post},
 };
-use diesel::prelude::*;
 use serde::Serialize;
 use tracing::{debug, info, instrument, warn};
 
-use crate::PocAppState;
 use crate::errors::ApiError;
 use crate::models;
+use crate::{AppState, repositories::ContentRepository};
 
 #[derive(Debug, serde::Deserialize)]
 struct CreateContentRequest {
@@ -29,25 +28,20 @@ async fn health() -> &'static str {
 }
 
 #[instrument(skip(state), fields(url = %payload.url, has_title = payload.title.is_some(), has_author = payload.author.is_some()))]
-async fn add_content(
-    State(state): State<PocAppState>,
+async fn add_content<S: AppState>(
+    State(state): State<S>,
     Json(payload): Json<CreateContentRequest>,
 ) -> Result<ResponseJson<ContentResponse>, ApiError> {
-    use crate::schema::content_items;
-
     debug!("Processing content request");
 
     // Create and validate the content item
     let new_content = models::NewContentItem::new(payload.url, payload.title, payload.author)?;
     debug!(normalized_url = %new_content.url, "URL validated and normalized");
 
-    let mut conn = state.db.lock().unwrap();
+    let content_repo = state.content_repo();
 
     // Check if URL already exists
-    let existing_item = content_items::table
-        .filter(content_items::url.eq(&new_content.url))
-        .first::<models::ContentItem>(&mut *conn)
-        .optional()?;
+    let existing_item = content_repo.find_by_url(&new_content.url).await?;
 
     if let Some(existing) = existing_item {
         // Check if metadata matches - if not, return error
@@ -71,10 +65,7 @@ async fn add_content(
     }
 
     // Insert new item
-    let inserted_content = diesel::insert_into(content_items::table)
-        .values(&new_content)
-        .returning(content_items::all_columns)
-        .get_result::<models::ContentItem>(&mut *conn)?;
+    let inserted_content = content_repo.create(&new_content).await?;
 
     info!(
         id = inserted_content.id,
@@ -88,8 +79,8 @@ async fn add_content(
     Ok(ResponseJson(response))
 }
 
-pub fn create_router() -> Router<PocAppState> {
+pub fn create_router<S: AppState>() -> Router<S> {
     Router::new()
         .route("/health", get(health))
-        .route("/content", post(add_content))
+        .route("/content", post(add_content::<S>))
 }

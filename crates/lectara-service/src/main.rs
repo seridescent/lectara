@@ -1,6 +1,6 @@
 use diesel::Connection;
 use diesel::sqlite::SqliteConnection;
-use lectara_service::{PocAppState, create_app};
+use lectara_service::{DefaultAppState, create_app};
 use std::sync::{Arc, Mutex};
 use tokio::signal;
 use tracing::{error, info};
@@ -25,9 +25,7 @@ async fn main() {
 
     info!(database_url = %database_url, "Connected to database");
 
-    let state = PocAppState {
-        db: Arc::new(Mutex::new(connection)),
-    };
+    let state = DefaultAppState::new(Arc::new(Mutex::new(connection)));
 
     let app = create_app(state);
 
