@@ -2,6 +2,7 @@ use diesel::Connection;
 use diesel::sqlite::SqliteConnection;
 use lectara_service::{AppState, create_app};
 use std::sync::{Arc, Mutex};
+use tokio::signal;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -39,8 +40,35 @@ async fn main() {
 
     info!("Server running on http://localhost:3000");
 
-    if let Err(err) = axum::serve(listener, app).await {
+    let server = axum::serve(listener, app);
+
+    if let Err(err) = server.await {
         error!(error = %err, "Server error");
         std::process::exit(1);
+    }
+}
+
+#[allow(dead_code)]
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
     }
 }
