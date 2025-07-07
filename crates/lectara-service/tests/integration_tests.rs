@@ -4,6 +4,34 @@ use serde_json::{Value, json};
 
 mod common;
 
+pub mod test_utils {
+    use diesel::SqliteConnection;
+    use diesel::prelude::*;
+    use lectara_service::models::ContentItem;
+    use lectara_service::schema::content_items;
+
+    pub fn count_content_items(conn: &mut SqliteConnection) -> i64 {
+        content_items::table
+            .count()
+            .get_result(conn)
+            .expect("Failed to count content items")
+    }
+
+    pub fn get_all_content_items(conn: &mut SqliteConnection) -> Vec<ContentItem> {
+        content_items::table
+            .load::<ContentItem>(conn)
+            .expect("Failed to load content items")
+    }
+
+    pub fn get_content_item_by_url(conn: &mut SqliteConnection, url: &str) -> Option<ContentItem> {
+        content_items::table
+            .filter(content_items::url.eq(url))
+            .first::<ContentItem>(conn)
+            .optional()
+            .expect("Failed to query content item by URL")
+    }
+}
+
 #[tokio::test]
 async fn test_add_content_endpoint() -> Result<()> {
     let (server, db) = common::server_utils::create_test_server();
@@ -23,7 +51,6 @@ async fn test_add_content_endpoint() -> Result<()> {
 
     // Verify database state
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
 
         assert_eq!(test_utils::count_content_items(&mut conn), 1);
@@ -57,7 +84,6 @@ async fn test_add_content_minimal_payload() -> Result<()> {
 
     // Verify database state
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
 
         assert_eq!(test_utils::count_content_items(&mut conn), 1);
@@ -91,7 +117,6 @@ async fn test_empty_body_converts_to_none() -> Result<()> {
 
     // Verify database state - empty string should be stored as None
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
 
         let saved_item =
@@ -147,7 +172,6 @@ async fn test_body_mismatch_handling() -> Result<()> {
 
     // Verify original item is unchanged
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
         assert_eq!(test_utils::count_content_items(&mut conn), 1);
 
@@ -182,7 +206,6 @@ async fn test_multiple_content_items() -> Result<()> {
 
     // Verify database state
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
 
         assert_eq!(test_utils::count_content_items(&mut conn), 2);
@@ -227,7 +250,6 @@ async fn test_duplicate_url_handling() -> Result<()> {
 
     // Verify only one record exists
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
         assert_eq!(test_utils::count_content_items(&mut conn), 1);
 
@@ -270,7 +292,6 @@ async fn test_true_idempotent_behavior() -> Result<()> {
 
     // Verify only one record exists
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
         assert_eq!(test_utils::count_content_items(&mut conn), 1);
 
@@ -314,7 +335,6 @@ async fn test_url_normalization() -> Result<()> {
 
     // Verify only one record and URL is normalized
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
         assert_eq!(test_utils::count_content_items(&mut conn), 1);
 
@@ -411,7 +431,6 @@ async fn test_url_with_query_parameters() -> Result<()> {
 
     // Verify only one record
     {
-        use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
         assert_eq!(test_utils::count_content_items(&mut conn), 1);
 
