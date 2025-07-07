@@ -1,5 +1,6 @@
 use diesel::Connection;
 use diesel::sqlite::SqliteConnection;
+use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 use lectara_service::{
     DefaultAppState,
     routes::create_router,
@@ -14,6 +15,8 @@ use tower::ServiceBuilder;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{error, info};
 
+pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
+
 #[tokio::main]
 async fn main() {
     // Initialize tracing
@@ -27,12 +30,34 @@ async fn main() {
     let database_url =
         std::env::var("DATABASE_URL").expect("DATABASE_URL environment variable must be set");
 
-    let connection = SqliteConnection::establish(&database_url).unwrap_or_else(|err| {
+    let mut connection = SqliteConnection::establish(&database_url).unwrap_or_else(|err| {
         error!(database_url = %database_url, error = %err, "Failed to connect to database");
         std::process::exit(1);
     });
 
     info!(database_url = %database_url, "Connected to database");
+
+    // Check for and run pending migrations
+    match connection.has_pending_migration(MIGRATIONS) {
+        Ok(has_pending) => {
+            if has_pending {
+                info!("Pending migrations found, running migrations...");
+                match connection.run_pending_migrations(MIGRATIONS) {
+                    Ok(_) => info!("Migrations completed successfully"),
+                    Err(err) => {
+                        error!(error = %err, "Failed to run migrations");
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                info!("No pending migrations");
+            }
+        }
+        Err(err) => {
+            error!(error = %err, "Failed to check for pending migrations");
+            std::process::exit(1);
+        }
+    }
 
     let app_state = DefaultAppState::new(Arc::new(Mutex::new(connection)));
     let shutdown_state = ShutdownState::new();
