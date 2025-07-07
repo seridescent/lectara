@@ -41,3 +41,21 @@ pub mod test_utils {
             .expect("Failed to query content item by URL")
     }
 }
+
+pub mod server_utils {
+    use super::*;
+    use axum_test::TestServer;
+    use lectara_service::{DefaultAppState, routes};
+    use std::sync::{Arc, Mutex};
+
+    pub fn create_test_server() -> (TestServer, Arc<Mutex<SqliteConnection>>) {
+        let connection = establish_test_connection();
+        let db = Arc::new(Mutex::new(connection));
+
+        let state = DefaultAppState::new(db.clone());
+        let app = routes::create_router().with_state(state);
+
+        let server = TestServer::new(app).unwrap();
+        (server, db)
+    }
+}

@@ -1,31 +1,12 @@
 use anyhow::Result;
 use axum::http::StatusCode;
-use axum_test::TestServer;
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
 
 mod common;
 
-mod helpers {
-    use super::*;
-    use crate::common::establish_test_connection;
-    use lectara_service::{DefaultAppState, routes};
-
-    pub fn create_test_server() -> (TestServer, Arc<Mutex<diesel::sqlite::SqliteConnection>>) {
-        let connection = establish_test_connection();
-        let db = Arc::new(Mutex::new(connection));
-
-        let state = DefaultAppState::new(db.clone());
-        let app = routes::create_router().with_state(state);
-
-        let server = TestServer::new(app).unwrap();
-        (server, db)
-    }
-}
-
 #[tokio::test]
 async fn test_add_content_endpoint() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     let content_payload = json!({
         "url": "https://example.com/test-article",
@@ -64,7 +45,7 @@ async fn test_add_content_endpoint() -> Result<()> {
 
 #[tokio::test]
 async fn test_add_content_minimal_payload() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     let content_payload = json!({
         "url": "https://example.com/minimal"
@@ -95,7 +76,7 @@ async fn test_add_content_minimal_payload() -> Result<()> {
 
 #[tokio::test]
 async fn test_empty_body_converts_to_none() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     let content_payload = json!({
         "url": "https://example.com/empty-body",
@@ -130,7 +111,7 @@ async fn test_empty_body_converts_to_none() -> Result<()> {
 
 #[tokio::test]
 async fn test_body_mismatch_handling() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     // Add first item with body
     let first_payload = json!({
@@ -181,7 +162,7 @@ async fn test_body_mismatch_handling() -> Result<()> {
 
 #[tokio::test]
 async fn test_multiple_content_items() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     // Add first item
     let first_payload = json!({
@@ -218,7 +199,7 @@ async fn test_multiple_content_items() -> Result<()> {
 
 #[tokio::test]
 async fn test_duplicate_url_handling() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     // Add first item
     let first_payload = json!({
@@ -264,7 +245,7 @@ async fn test_duplicate_url_handling() -> Result<()> {
 
 #[tokio::test]
 async fn test_true_idempotent_behavior() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     // Add first item
     let payload = json!({
@@ -307,7 +288,7 @@ async fn test_true_idempotent_behavior() -> Result<()> {
 
 #[tokio::test]
 async fn test_url_normalization() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     // Add URL with fragment and trailing slash
     let payload1 = json!({
@@ -348,7 +329,7 @@ async fn test_url_normalization() -> Result<()> {
 
 #[tokio::test]
 async fn test_invalid_url_rejection() -> Result<()> {
-    let (server, _db) = helpers::create_test_server();
+    let (server, _db) = common::server_utils::create_test_server();
 
     let test_cases = vec![
         ("", "empty URL"),
@@ -374,7 +355,7 @@ async fn test_invalid_url_rejection() -> Result<()> {
 
 #[tokio::test]
 async fn test_invalid_content_type() -> Result<()> {
-    let (server, _db) = helpers::create_test_server();
+    let (server, _db) = common::server_utils::create_test_server();
 
     let response = server
         .post("/api/v1/content")
@@ -389,7 +370,7 @@ async fn test_invalid_content_type() -> Result<()> {
 
 #[tokio::test]
 async fn test_missing_content_type() -> Result<()> {
-    let (server, _db) = helpers::create_test_server();
+    let (server, _db) = common::server_utils::create_test_server();
 
     let response = server
         .post("/api/v1/content")
@@ -404,7 +385,7 @@ async fn test_missing_content_type() -> Result<()> {
 
 #[tokio::test]
 async fn test_url_with_query_parameters() -> Result<()> {
-    let (server, db) = helpers::create_test_server();
+    let (server, db) = common::server_utils::create_test_server();
 
     // URLs with different query parameter orders should normalize to same URL
     let payload1 = json!({
