@@ -58,7 +58,6 @@
             server.succeed("systemctl is-active lectara.service")
           
             # Check service logs for startup confirmation
-            # Adjust this based on your actual log output
             server.succeed("journalctl -u lectara.service | grep 'Server running on http://'")
           
             # Send a POST request to create content
@@ -272,8 +271,146 @@
             print("Reboot resilience test passed! 💪")
           '';
         };
+      };
 
+      wipTests = {
+        service-upgrade = mkTest "lectara-service-upgrade" {
+          serverConfig = { pkgs, ... }: {
+            # Start with base service config
+            services.lectara = {
+              enable = true;
+              port = 3000;
+            };
 
+            networking.firewall.enable = false;
+            environment.systemPackages = [ pkgs.sqlite ];
+
+            # Allow switching configurations for upgrade testing
+            system.stateVersion = "25.11";
+
+            # Create a second configuration that simulates an upgrade
+            specialisation.upgraded.configuration = {
+              services.lectara = {
+                enable = true;
+                port = 3001;
+                # You could test config changes here
+                # For example, if you added new options in the future
+              };
+
+              # potentially override the package to test version changes
+            };
+          };
+
+          clientConfig = { pkgs, ... }: {
+            environment.systemPackages = with pkgs; [ curl jq ];
+          };
+
+          script = ''
+            import time
+    
+            start_all()
+    
+            # Initial service startup
+            server.wait_for_unit("lectara.service")
+            server.sleep(2)
+
+            # Check that the service started successfully
+            server.succeed("systemctl is-active lectara.service")
+          
+            # Check service logs for startup confirmation
+            server.succeed("journalctl -u lectara.service | grep 'Server running on http://'")
+    
+            # Create some initial data
+            print("Creating initial content...")
+            for i in range(5):
+                client.succeed(f"""
+                    curl -s -X POST http://server:3000/api/v1/content \
+                      -H 'Content-Type: application/json' \
+                      -d '{{"url": "https://example.com/article{i}", "title": "Article {i}"}}' \
+                      -o /dev/null
+                """)
+    
+            # Verify initial data
+            initial_count = server.succeed("""
+                sqlite3 /var/lib/lectara/data/lectara.db \
+                  "SELECT COUNT(*) FROM content_items;"
+            """).strip()
+            assert initial_count == "5", f"Expected 5 items, got {initial_count}"
+    
+            # Start a background request that will be in-flight during upgrade
+            print("Starting long-running request...")
+
+            # delay all outgoing packets
+            server.succeed("tc qdisc add dev eth1 root netem delay 5000ms")
+
+            client.execute("""
+                curl -s -X POST http://server:3000/api/v1/content \
+                  -H 'Content-Type: application/json' \
+                  -d '{"url": "https://example.com/during-upgrade", "title": "Created During Upgrade"}' \
+                  -w '\n%{http_code}'
+                  --max-time 30 > /tmp/upgrade-request.out 2>&1 &
+            """)
+    
+            # Give the request time to start
+            time.sleep(0.5)
+
+            # Perform the "upgrade" by switching to the specialisation
+            print("Performing upgrade...")
+            server.succeed("nixos-rebuild switch --specialisation upgraded")
+
+            # check logs for num_ongoing_requests_at_shutdown=1
+            server.succeed("journalctl -u lectara.service | grep 'num_ongoing_requests_at_shutdown=1'")
+
+            # clean up network delay
+            server.succeed("tc qdisc del dev eth1 root netem")
+    
+            # Wait for service to come back up
+            server.wait_for_unit("lectara.service")
+            server.sleep(2)
+    
+            # Check if the in-flight request completed and succeeded
+            upgrade_response = client.succeed("cat /tmp/upgrade-request.out")
+            status_code = upgrade_response.strip().split('\n')[-1]
+            assert status_code in ["200", "201"], f"Service did not complete in-flight request before upgrade: {status_code}"
+            
+    
+            # Verify data integrity after upgrade
+            print("Checking data integrity...")
+            post_upgrade_count = server.succeed("""
+                sqlite3 /var/lib/lectara/data/lectara.db \
+                  "SELECT COUNT(*) FROM content_items;"
+            """).strip()
+    
+            # Should have at least the original 5 items
+            assert int(post_upgrade_count) >= 5, f"Data loss detected! Only {post_upgrade_count} items"
+    
+            # Verify service is fully functional after upgrade
+            print("Testing post-upgrade functionality...")
+            response = server.succeed("""
+                curl -s -X POST http://localhost:3000/api/v1/content \
+                  -H 'Content-Type: application/json' \
+                  -d '{"url": "https://example.com/post-upgrade", "title": "Post Upgrade Test"}' \
+                  -w '\n%{http_code}'
+            """)
+    
+            status_code = response.strip().split('\n')[-1]
+            assert status_code in ["200", "201"], f"Service not functioning after upgrade: {status_code}"
+    
+            # Test idempotency still works
+            print("Testing idempotency after upgrade...")
+            response2 = server.succeed("""
+                curl -s -X POST http://localhost:3000/api/v1/content \
+                  -H 'Content-Type: application/json' \
+                  -d '{"url": "https://example.com/article1", "title": "Article 1"}' \
+                  -w '\n%{http_code}'
+            """)
+    
+            status_code2 = response2.strip().split('\n')[-1]
+            assert status_code2 == "200", f"Idempotency broken after upgrade: {status_code2}"
+    
+            print("Upgrade test passed! 🚀")
+          '';
+        };
       };
     in
     {
