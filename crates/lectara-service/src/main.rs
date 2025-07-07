@@ -5,10 +5,13 @@ use lectara_service::{
     routes::create_router,
     shutdown::{GracefulShutdownLayer, ShutdownState},
 };
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 use tokio::signal;
 use tower::ServiceBuilder;
-use tower_http::trace::TraceLayer;
+use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing::{error, info};
 
 #[tokio::main]
@@ -38,7 +41,8 @@ async fn main() {
         .layer(
             ServiceBuilder::new()
                 .layer(TraceLayer::new_for_http())
-                .layer(GracefulShutdownLayer::new(shutdown_state.clone())),
+                .layer(GracefulShutdownLayer::new(shutdown_state.clone()))
+                .layer(TimeoutLayer::new(Duration::from_secs(15))),
         )
         .with_state(app_state);
 
@@ -86,14 +90,6 @@ async fn shutdown_signal(shutdown_state: ShutdownState) {
     let shutdown_completed = shutdown_state.completed();
     shutdown_state.start_shutdown();
 
-    let shutdown_timeout = tokio::time::Duration::from_secs(30);
-
-    tokio::select! {
-        _ = shutdown_completed => {
-            info!("Graceful shutdown completed - all requests finished");
-        },
-        _ = tokio::time::sleep(shutdown_timeout) => {
-            info!("Graceful shutdown timeout expired - forcing shutdown");
-        }
-    }
+    shutdown_completed.await;
+    info!("Graceful shutdown completed - all requests finished");
 }
