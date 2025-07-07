@@ -14,17 +14,6 @@
         }
       ];
 
-      commands = [
-        {
-          name = "test-nixos";
-          help = "run NixOS tests for this project; pass test name or default to all";
-          command = ''
-            ARG=''${1:-all}
-            nix build -L .#test-$ARG
-          '';
-        }
-      ];
-
       devshell = {
         packagesFrom = [
           self'.devShells.rust
