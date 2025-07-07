@@ -28,8 +28,6 @@ enum Commands {
         #[arg(short, long)]
         author: Option<String>,
     },
-    /// Check service health
-    Health,
 }
 
 #[derive(Serialize)]
@@ -53,9 +51,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         Commands::Add { url, title, author } => {
             add_content(&client, &cli.service_url, url, title, author).await?;
         }
-        Commands::Health => {
-            check_health(&client, &cli.service_url).await?;
-        }
     }
 
     Ok(())
@@ -68,7 +63,7 @@ async fn add_content(
     title: Option<String>,
     author: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
-    let endpoint = format!("{service_url}/content");
+    let endpoint = format!("{service_url}/api/v1/content");
 
     let payload = NewContentItem { url, title, author };
 
@@ -83,21 +78,6 @@ async fn add_content(
     } else {
         eprintln!("Failed to add content: {}", response.status());
         eprintln!("Response: {}", response.text().await?);
-    }
-
-    Ok(())
-}
-
-async fn check_health(client: &Client, service_url: &str) -> Result<(), Box<dyn Error>> {
-    let endpoint = format!("{service_url}/health");
-
-    let response = client.get(&endpoint).send().await?;
-
-    if response.status().is_success() {
-        let health_status = response.text().await?;
-        println!("Service health: {health_status}");
-    } else {
-        eprintln!("Health check failed: {}", response.status());
     }
 
     Ok(())
