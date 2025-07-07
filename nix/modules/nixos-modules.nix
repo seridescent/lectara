@@ -24,26 +24,62 @@
           };
 
           openFirewall = lib.mkOption {
-            description = "Whether to open the firewall for the service's port";
+            description = "Open the firewall for the service's port";
             default = false;
             type = lib.types.bool;
           };
 
-          databasePath = lib.mkOption {
-            description = "Path to the SQLite database file";
-            default = "/var/lib/lectara/lectara.db";
+          user = lib.mkOption {
+            description = "User account under which the service runs";
+            default = "lectara";
+            type = lib.types.str;
+          };
+
+          group = lib.mkOption {
+            description = "Group under which the service runs";
+            default = "lectara";
+            type = lib.types.str;
+          };
+
+          baseDir = lib.mkOption {
+            description = "Base directory for the service (used for WorkingDir and database parent)";
+            default = "/var/lib/lectara";
             type = lib.types.path;
           };
         };
       };
 
       config = lib.mkIf cfg.enable {
+        # Create user and group
+        users.users = lib.mkIf (cfg.user == "lectara") {
+          lectara = {
+            inherit (cfg) group;
+            isSystemUser = true;
+          };
+        };
+
+        users.groups = lib.mkIf (cfg.group == "lectara") {
+          lectara = { };
+        };
+
+        # Ensure directories exist with proper permissions
+        systemd.tmpfiles.settings.lectaraDirs = {
+          "${cfg.baseDir}"."d" = {
+            mode = "750";
+            inherit (cfg) user group;
+          };
+          "${cfg.baseDir}/data"."d" = {
+            mode = "750";
+            inherit (cfg) user group;
+          };
+        };
+
         systemd.services.lectara = {
           description = "Lectara content collection service";
           wantedBy = [ "multi-user.target" ];
 
           environment = {
-            DATABASE_URL = "sqlite://${cfg.databasePath}";
+            DATABASE_URL = "sqlite://${cfg.baseDir}/data/lectara.db";
             RUST_LOG = "info";
           };
 
@@ -52,21 +88,17 @@
             Restart = "on-failure";
             RestartSec = 5;
 
-            # Security hardening
-            DynamicUser = true;
-            StateDirectory = "lectara";
-            PrivateTmp = true;
-            ProtectSystem = "strict";
-            ProtectHome = true;
-            NoNewPrivileges = true;
+            # User and directory configuration
+            User = cfg.user;
+            Group = cfg.group;
+            WorkingDirectory = cfg.baseDir;
 
-            # Ensure the database directory exists
-            RuntimeDirectory = "lectara";
-            RuntimeDirectoryMode = "0700";
+            # Security hardening
+            PrivateTmp = true;
+            NoNewPrivileges = true;
           };
         };
 
-        # Open the firewall if needed
         networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
       };
     };

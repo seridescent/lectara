@@ -93,7 +93,7 @@
           
             # Query the database to verify the content was saved
             db_result = server.succeed("""
-                sqlite3 /var/lib/lectara/lectara.db \
+                sqlite3 /var/lib/lectara/data/lectara.db \
                   "SELECT url, title, author FROM content_items WHERE url='https://example.com/article';"
             """)
           
@@ -113,7 +113,7 @@
           
             # Verify we now have 2 items
             count = server.succeed("""
-                sqlite3 /var/lib/lectara/lectara.db \
+                sqlite3 /var/lib/lectara/data/lectara.db \
                   "SELECT COUNT(*) FROM content_items;"
             """).strip()
           
@@ -130,7 +130,7 @@
           
             # Final check - ensure all 3 items are in the database
             all_urls = server.succeed("""
-                sqlite3 /var/lib/lectara/lectara.db \
+                sqlite3 /var/lib/lectara/data/lectara.db \
                   "SELECT url FROM content_items ORDER BY created_at;"
             """)
           
