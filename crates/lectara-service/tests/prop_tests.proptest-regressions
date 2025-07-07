@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc ce4c60afb22006ce42be959297c5195fa8ec026980303febb7a33d2a4dbd92f5 # shrinks to base_url = "000.aa/a", params = [("wf", "a"), ("wf", "b")], fragment = None, title = None
