@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 use http::{Request, Response, StatusCode};
 use http_body::Body;
 use pin_project::pin_project;
+use tokio::sync::{Notify, futures::Notified};
 use tower::{Layer, Service};
 
 /// Shared state for tracking shutdown status and in-flight requests
@@ -14,6 +15,7 @@ use tower::{Layer, Service};
 pub struct ShutdownState {
     is_shutting_down: Arc<AtomicBool>,
     in_flight_count: Arc<AtomicUsize>,
+    shutdown_complete: Arc<Notify>,
 }
 
 impl Default for ShutdownState {
@@ -28,12 +30,17 @@ impl ShutdownState {
         Self {
             is_shutting_down: Arc::new(AtomicBool::new(false)),
             in_flight_count: Arc::new(AtomicUsize::new(0)),
+            shutdown_complete: Arc::new(Notify::new()),
         }
     }
 
     /// Signal that shutdown has started
     pub fn start_shutdown(&self) {
         self.is_shutting_down.store(true, Ordering::SeqCst);
+        // If there are no in-flight requests, notify immediately
+        if self.in_flight_count.load(Ordering::SeqCst) == 0 {
+            self.shutdown_complete.notify_waiters();
+        }
     }
 
     /// Check if shutdown is in progress
@@ -44,6 +51,11 @@ impl ShutdownState {
     /// Get the current number of in-flight requests
     pub fn in_flight_count(&self) -> usize {
         self.in_flight_count.load(Ordering::SeqCst)
+    }
+
+    /// Wait for graceful shutdown to complete
+    pub fn completed(&self) -> Notified<'_> {
+        self.shutdown_complete.notified()
     }
 }
 
@@ -146,7 +158,11 @@ where
 
                 // If the future is complete, decrement the counter
                 if result.is_ready() {
-                    this.state.in_flight_count.fetch_sub(1, Ordering::SeqCst);
+                    let new_count = this.state.in_flight_count.fetch_sub(1, Ordering::SeqCst);
+                    // If we just went from 1 to 0 during shutdown, notify waiters
+                    if new_count == 1 && this.state.is_shutting_down() {
+                        this.state.shutdown_complete.notify_waiters();
+                    }
                 }
 
                 result

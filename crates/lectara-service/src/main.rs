@@ -1,8 +1,14 @@
 use diesel::Connection;
 use diesel::sqlite::SqliteConnection;
-use lectara_service::{DefaultAppState, create_app};
+use lectara_service::{
+    DefaultAppState,
+    routes::create_router,
+    shutdown::{GracefulShutdownLayer, ShutdownState},
+};
 use std::sync::{Arc, Mutex};
 use tokio::signal;
+use tower::ServiceBuilder;
+use tower_http::trace::TraceLayer;
 use tracing::{error, info};
 
 #[tokio::main]
@@ -25,9 +31,16 @@ async fn main() {
 
     info!(database_url = %database_url, "Connected to database");
 
-    let state = DefaultAppState::new(Arc::new(Mutex::new(connection)));
+    let app_state = DefaultAppState::new(Arc::new(Mutex::new(connection)));
+    let shutdown_state = ShutdownState::new();
 
-    let app = create_app(state);
+    let app = create_router()
+        .layer(
+            ServiceBuilder::new()
+                .layer(TraceLayer::new_for_http())
+                .layer(GracefulShutdownLayer::new(shutdown_state.clone())),
+        )
+        .with_state(app_state);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
         .await
@@ -38,7 +51,7 @@ async fn main() {
 
     info!("Server running on http://localhost:3000");
 
-    let server = axum::serve(listener, app);
+    let server = axum::serve(listener, app).with_graceful_shutdown(shutdown_signal(shutdown_state));
 
     if let Err(err) = server.await {
         error!(error = %err, "Server error");
@@ -46,8 +59,7 @@ async fn main() {
     }
 }
 
-#[allow(dead_code)]
-async fn shutdown_signal() {
+async fn shutdown_signal(shutdown_state: ShutdownState) {
     let ctrl_c = async {
         signal::ctrl_c()
             .await
@@ -68,5 +80,20 @@ async fn shutdown_signal() {
     tokio::select! {
         _ = ctrl_c => {},
         _ = terminate => {},
+    }
+
+    info!("Shutdown signal received, starting graceful shutdown");
+    let shutdown_completed = shutdown_state.completed();
+    shutdown_state.start_shutdown();
+
+    let shutdown_timeout = tokio::time::Duration::from_secs(30);
+
+    tokio::select! {
+        _ = shutdown_completed => {
+            info!("Graceful shutdown completed - all requests finished");
+        },
+        _ = tokio::time::sleep(shutdown_timeout) => {
+            info!("Graceful shutdown timeout expired - forcing shutdown");
+        }
     }
 }
