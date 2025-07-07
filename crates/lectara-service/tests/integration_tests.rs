@@ -30,7 +30,8 @@ async fn test_add_content_endpoint() -> Result<()> {
     let content_payload = json!({
         "url": "https://example.com/test-article",
         "title": "Test Article",
-        "author": "Test Author"
+        "author": "Test Author",
+        "body": "This is the content body of the test article with some sample text."
     });
 
     let response = server.post("/api/v1/content").json(&content_payload).await;
@@ -53,6 +54,10 @@ async fn test_add_content_endpoint() -> Result<()> {
         assert_eq!(saved_item.url, "https://example.com/test-article");
         assert_eq!(saved_item.title, Some("Test Article".to_string()));
         assert_eq!(saved_item.author, Some("Test Author".to_string()));
+        assert_eq!(
+            saved_item.body,
+            Some("This is the content body of the test article with some sample text.".to_string())
+        );
     }
     Ok(())
 }
@@ -83,6 +88,93 @@ async fn test_add_content_minimal_payload() -> Result<()> {
         assert_eq!(saved_item.url, "https://example.com/minimal");
         assert!(saved_item.title.is_none());
         assert!(saved_item.author.is_none());
+        assert!(saved_item.body.is_none());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_empty_body_converts_to_none() -> Result<()> {
+    let (server, db) = helpers::create_test_server();
+
+    let content_payload = json!({
+        "url": "https://example.com/empty-body",
+        "title": "Article with Empty Body",
+        "author": "Test Author",
+        "body": ""
+    });
+
+    let response = server.post("/api/v1/content").json(&content_payload).await;
+
+    response.assert_status_ok();
+
+    // Verify database state - empty string should be stored as None
+    {
+        use crate::common::test_utils;
+        let mut conn = db.lock().unwrap();
+
+        let saved_item =
+            test_utils::get_content_item_by_url(&mut conn, "https://example.com/empty-body")
+                .expect("Content item should exist in database");
+
+        assert_eq!(saved_item.url, "https://example.com/empty-body");
+        assert_eq!(
+            saved_item.title,
+            Some("Article with Empty Body".to_string())
+        );
+        assert_eq!(saved_item.author, Some("Test Author".to_string()));
+        assert!(saved_item.body.is_none()); // Empty string converted to None
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_body_mismatch_handling() -> Result<()> {
+    let (server, db) = helpers::create_test_server();
+
+    // Add first item with body
+    let first_payload = json!({
+        "url": "https://example.com/body-test",
+        "title": "Test Article",
+        "author": "Test Author",
+        "body": "Original body content"
+    });
+
+    let response1 = server.post("/api/v1/content").json(&first_payload).await;
+    response1.assert_status_ok();
+
+    // Attempt to add same URL with different body
+    let second_payload = json!({
+        "url": "https://example.com/body-test",
+        "title": "Test Article",
+        "author": "Test Author",
+        "body": "Different body content"
+    });
+
+    let response2 = server.post("/api/v1/content").json(&second_payload).await;
+    response2.assert_status(StatusCode::CONFLICT);
+
+    // Attempt to add same URL with no body (body mismatch)
+    let third_payload = json!({
+        "url": "https://example.com/body-test",
+        "title": "Test Article",
+        "author": "Test Author"
+    });
+
+    let response3 = server.post("/api/v1/content").json(&third_payload).await;
+    response3.assert_status(StatusCode::CONFLICT);
+
+    // Verify original item is unchanged
+    {
+        use crate::common::test_utils;
+        let mut conn = db.lock().unwrap();
+        assert_eq!(test_utils::count_content_items(&mut conn), 1);
+
+        let saved_item =
+            test_utils::get_content_item_by_url(&mut conn, "https://example.com/body-test")
+                .expect("Content item should exist in database");
+
+        assert_eq!(saved_item.body, Some("Original body content".to_string()));
     }
     Ok(())
 }
@@ -165,6 +257,7 @@ async fn test_duplicate_url_handling() -> Result<()> {
         // Should keep original metadata
         assert_eq!(saved_item.title, Some("First Title".to_string()));
         assert_eq!(saved_item.author, Some("First Author".to_string()));
+        assert!(saved_item.body.is_none());
     }
     Ok(())
 }
@@ -177,7 +270,8 @@ async fn test_true_idempotent_behavior() -> Result<()> {
     let payload = json!({
         "url": "https://example.com/idempotent-test",
         "title": "Same Title",
-        "author": "Same Author"
+        "author": "Same Author",
+        "body": "Same body content"
     });
 
     let response1 = server.post("/api/v1/content").json(&payload).await;
@@ -198,6 +292,15 @@ async fn test_true_idempotent_behavior() -> Result<()> {
         use crate::common::test_utils;
         let mut conn = db.lock().unwrap();
         assert_eq!(test_utils::count_content_items(&mut conn), 1);
+
+        let saved_item =
+            test_utils::get_content_item_by_url(&mut conn, "https://example.com/idempotent-test")
+                .expect("Content item should exist in database");
+
+        // Verify all fields are preserved
+        assert_eq!(saved_item.title, Some("Same Title".to_string()));
+        assert_eq!(saved_item.author, Some("Same Author".to_string()));
+        assert_eq!(saved_item.body, Some("Same body content".to_string()));
     }
     Ok(())
 }

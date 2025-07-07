@@ -11,6 +11,7 @@ pub struct ContentItem {
     pub title: Option<String>,
     pub author: Option<String>,
     pub created_at: chrono::NaiveDateTime,
+    pub body: Option<String>,
 }
 
 #[derive(Debug, Insertable, Deserialize)]
@@ -19,6 +20,7 @@ pub struct NewContentItem {
     pub url: String,
     pub title: Option<String>,
     pub author: Option<String>,
+    pub body: Option<String>,
 }
 
 impl NewContentItem {
@@ -26,6 +28,7 @@ impl NewContentItem {
         url: String,
         title: Option<String>,
         author: Option<String>,
+        body: Option<String>,
     ) -> Result<Self, crate::validation::ValidationError> {
         let normalized_url = normalize_url(&url)?;
 
@@ -33,6 +36,7 @@ impl NewContentItem {
             url: normalized_url,
             title,
             author,
+            body,
         })
     }
 }

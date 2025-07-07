@@ -27,6 +27,9 @@ enum Commands {
         /// Optional author of the content
         #[arg(short, long)]
         author: Option<String>,
+        /// Optional body text for the content
+        #[arg(short, long)]
+        body: Option<String>,
     },
 }
 
@@ -35,6 +38,7 @@ struct NewContentItem {
     url: String,
     title: Option<String>,
     author: Option<String>,
+    body: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -48,8 +52,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let client = Client::new();
 
     match cli.command {
-        Commands::Add { url, title, author } => {
-            add_content(&client, &cli.service_url, url, title, author).await?;
+        Commands::Add {
+            url,
+            title,
+            author,
+            body,
+        } => {
+            add_content(&client, &cli.service_url, url, title, author, body).await?;
         }
     }
 
@@ -62,10 +71,16 @@ async fn add_content(
     url: String,
     title: Option<String>,
     author: Option<String>,
+    body: Option<String>,
 ) -> Result<(), Box<dyn Error>> {
     let endpoint = format!("{service_url}/api/v1/content");
 
-    let payload = NewContentItem { url, title, author };
+    let payload = NewContentItem {
+        url,
+        title,
+        author,
+        body,
+    };
 
     let response = client.post(&endpoint).json(&payload).send().await?;
 

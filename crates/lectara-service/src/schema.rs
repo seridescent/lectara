@@ -7,5 +7,6 @@ diesel::table! {
         title -> Nullable<Text>,
         author -> Nullable<Text>,
         created_at -> Timestamp,
+        body -> Nullable<Text>
     }
 }
