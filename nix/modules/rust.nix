@@ -24,9 +24,20 @@
         inherit src;
         strictDeps = true;
 
-        nativeBuildInputs = [ ];
+        # OpenSSL env vars and pkg-config needed
+        # to compile rust project that uses openssl-sys
+        OPENSSL_NO_VENDOR = 1;
+        OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
+        OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include";
 
-        buildInputs = [ pkgs.sqlite ];
+        nativeBuildInputs = [
+          pkgs.pkg-config
+        ];
+
+        buildInputs = [
+          pkgs.sqlite
+          pkgs.openssl
+        ];
       };
 
       cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -52,8 +63,6 @@
               (projectRoot + /crates/lectara-service/migrations)
             ];
           };
-
-          buildInputs = (individualCrateArgs.buildInputs or [ ]) ++ [ pkgs.sqlite ];
         }
       );
 

@@ -1007,7 +1007,6 @@ dependencies = [
  "http-body-util",
  "hyper",
  "pin-project",
- "reqwest",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
