@@ -1,6 +1,6 @@
 # lectara
 
-collecting consumed internet content for later use.
+collecting consumed internet content for later use. a silly toy service.
 
 ## status
 
