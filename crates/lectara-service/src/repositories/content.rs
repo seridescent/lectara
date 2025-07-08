@@ -50,13 +50,10 @@ impl ContentRepository for SqliteContentRepository {
     async fn list(&self, params: &ListContentParams) -> Result<ListContentResult, ApiError> {
         let mut conn = self.db.lock().unwrap();
 
-        // Default limit to 50, max 1000
         let limit = params.limit.unwrap_or(50).min(1000) as i64;
 
-        // Build base query
         let mut query = content_items::table.into_boxed();
 
-        // Apply date filters
         if let Some(since) = params.since {
             query = query.filter(content_items::created_at.ge(since));
         }
@@ -68,12 +65,10 @@ impl ContentRepository for SqliteContentRepository {
             query = query.offset(offset as i64);
         }
 
-        // Order by created_at DESC, id DESC for consistent sorting
         query = query.order((content_items::created_at.desc(), content_items::id.desc()));
 
         let items = query.limit(limit).load::<ContentItem>(&mut *conn)?;
 
-        // Get total count for the filtered query (without cursor pagination)
         let mut count_query = content_items::table.into_boxed();
         if let Some(since) = params.since {
             count_query = count_query.filter(content_items::created_at.ge(since));
