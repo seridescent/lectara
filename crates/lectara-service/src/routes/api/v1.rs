@@ -1,15 +1,19 @@
 use axum::{
     Router,
-    extract::{Json, State},
+    extract::{Json, Path, Query, State},
     response::Json as ResponseJson,
-    routing::post,
+    routing::{get, post},
 };
-use serde::Serialize;
+use chrono::{DateTime, NaiveDateTime};
+use serde::{Deserialize, Serialize};
 use tracing::{debug, info, instrument, warn};
 
 use crate::errors::ApiError;
 use crate::models;
-use crate::{AppState, repositories::ContentRepository};
+use crate::{
+    AppState,
+    repositories::{ContentRepository, ListContentParams},
+};
 
 #[derive(Debug, serde::Deserialize)]
 struct AddContentRequest {
@@ -22,6 +26,30 @@ struct AddContentRequest {
 #[derive(Debug, Serialize)]
 struct ContentResponse {
     id: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct ListContentQuery {
+    limit: Option<u32>,
+    offset: Option<u32>,
+    since: Option<String>, // ISO 8601 datetime string
+    until: Option<String>, // ISO 8601 datetime string
+}
+
+#[derive(Debug, Serialize)]
+struct ContentSummary {
+    id: i32,
+    url: String,
+    title: Option<String>,
+    author: Option<String>,
+    created_at: NaiveDateTime,
+}
+
+#[derive(Debug, Serialize)]
+struct ListContentResponse {
+    items: Vec<ContentSummary>,
+    total: u64,
+    limit: u32,
 }
 
 #[instrument(skip_all, fields(url = %payload.url, has_title = payload.title.is_some(), has_author = payload.author.is_some(), has_body = payload.body.is_some()))]
@@ -95,6 +123,112 @@ async fn add_content<S: AppState>(
     Ok(ResponseJson(response))
 }
 
+#[instrument(skip_all, fields(limit = query.limit, offset = query.offset, has_since = query.since.is_some(), has_until = query.until.is_some()))]
+async fn list_content<S: AppState>(
+    State(state): State<S>,
+    Query(query): Query<ListContentQuery>,
+) -> Result<ResponseJson<ListContentResponse>, ApiError> {
+    debug!("Processing list content request");
+
+    // Parse datetime strings
+    let since = if let Some(since_str) = &query.since {
+        Some(
+            DateTime::parse_from_rfc3339(since_str)
+                .map_err(|_| {
+                    ApiError::BadRequest(
+                        "Invalid 'since' datetime format. Use RFC3339 format.".to_string(),
+                    )
+                })?
+                .naive_utc(),
+        )
+    } else {
+        None
+    };
+
+    let until = if let Some(until_str) = &query.until {
+        Some(
+            DateTime::parse_from_rfc3339(until_str)
+                .map_err(|_| {
+                    ApiError::BadRequest(
+                        "Invalid 'until' datetime format. Use RFC3339 format.".to_string(),
+                    )
+                })?
+                .naive_utc(),
+        )
+    } else {
+        None
+    };
+
+    // Validate limit
+    if let Some(limit) = query.limit {
+        if limit == 0 {
+            return Err(ApiError::BadRequest(
+                "Limit must be greater than 0".to_string(),
+            ));
+        }
+    }
+
+    let params = ListContentParams {
+        limit: query.limit,
+        offset: query.offset,
+        since,
+        until,
+    };
+
+    let content_repo = state.content_repo();
+    let result = content_repo.list(&params).await?;
+
+    let items = result
+        .items
+        .into_iter()
+        .map(|item| ContentSummary {
+            id: item.id,
+            url: item.url,
+            title: item.title,
+            author: item.author,
+            created_at: item.created_at,
+        })
+        .collect();
+
+    let response = ListContentResponse {
+        items,
+        total: result.total,
+        limit: params.limit.unwrap_or(50),
+    };
+
+    info!(
+        returned_count = response.items.len(),
+        total = response.total,
+        "Successfully retrieved content list"
+    );
+
+    Ok(ResponseJson(response))
+}
+
+#[instrument(skip_all, fields(id = %id))]
+async fn get_content_by_id<S: AppState>(
+    State(state): State<S>,
+    Path(id): Path<i32>,
+) -> Result<ResponseJson<models::ContentItem>, ApiError> {
+    debug!("Processing get content by ID request");
+
+    let content_repo = state.content_repo();
+    let content = content_repo.find_by_id(id).await?;
+
+    match content {
+        Some(item) => {
+            info!(id = item.id, "Successfully retrieved content item");
+            Ok(ResponseJson(item))
+        }
+        None => {
+            debug!("Content item not found");
+            Err(ApiError::NotFound)
+        }
+    }
+}
+
 pub fn create_api_v1_router<S: AppState>() -> Router<S> {
-    Router::new().route("/content", post(add_content::<S>))
+    Router::new()
+        .route("/content", post(add_content::<S>).get(list_content::<S>))
+        .route("/content/{id}", get(get_content_by_id::<S>))
 }

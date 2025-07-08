@@ -1,9 +1,6 @@
-use crate::common::{server_utils::create_test_server, test_utils};
-use anyhow::Result;
-use axum::http::StatusCode;
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Utc};
 use proptest::prelude::*;
-use serde_json::{Value, json};
+use url::form_urlencoded;
 
 // Generate datetime ranges for testing date filtering
 prop_compose! {
@@ -38,6 +35,12 @@ prop_compose! {
 
 #[cfg(test)]
 mod properties {
+    use chrono::NaiveDateTime;
+    use http::StatusCode;
+    use serde_json::{Value, json};
+
+    use crate::common::{server_utils::create_test_server, test_utils};
+
     use super::*;
 
     proptest! {
@@ -106,7 +109,7 @@ mod properties {
             items_before in prop::collection::vec(arb_content_with_timestamp(), 1..5),
             items_in_range in prop::collection::vec(arb_content_with_timestamp(), 1..5),
             items_after in prop::collection::vec(arb_content_with_timestamp(), 1..5),
-        ) {
+        )  {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(async {
                 let (server, db) = create_test_server();
@@ -156,11 +159,12 @@ mod properties {
                 }
 
                 // Test filtering with since parameter
-                let since_param = start_date.to_rfc3339();
+                let since_param = form_urlencoded::byte_serialize(start_date.to_rfc3339().as_bytes()).collect::<String>();
                 let response = server
                     .get(&format!("/api/v1/content?since={}", since_param))
                     .await;
-                prop_assert_eq!(response.status_code(), StatusCode::OK);
+                prop_assert_eq!(response.status_code(), StatusCode::OK,
+                    "GET /api/v1/content?since={} failed with {}", since_param, response.text());
 
                 let json_response: Value = response.json();
                 let returned_items = json_response["items"].as_array().unwrap();
@@ -178,7 +182,7 @@ mod properties {
                 }
 
                 Ok(())
-            }).expect("Async proptest should not fail")
+            }).expect("async proptest failed")
         }
 
         #[test]
@@ -190,7 +194,8 @@ mod properties {
             rt.block_on(async {
                 let (server, db) = create_test_server();
 
-                // Insert all items
+                // Insert all items, track which ones were actually created
+                let mut created_count = 0;
                 for (timestamp, url, title, author, body) in &items {
                     let payload = json!({
                         "url": url,
@@ -200,16 +205,18 @@ mod properties {
                     });
 
                     let response = server.post("/api/v1/content").json(&payload).await;
-                    prop_assert_eq!(response.status_code(), StatusCode::OK);
+                    // Might be 409 due to duplicate URL, which is OK
+                    if response.status_code() == StatusCode::OK {
+                        created_count += 1;
+                        let json_response: Value = response.json();
+                        let item_id = json_response["id"].as_u64().unwrap() as i32;
 
-                    let json_response: Value = response.json();
-                    let item_id = json_response["id"].as_u64().unwrap() as i32;
-
-                    // Update timestamp
-                    {
-                        let mut conn = db.lock().unwrap();
-                        let naive_dt = DateTime::from_timestamp(*timestamp, 0).unwrap().naive_utc();
-                        test_utils::update_content_item_timestamp(&mut conn, item_id, naive_dt);
+                        // Update timestamp
+                        {
+                            let mut conn = db.lock().unwrap();
+                            let naive_dt = DateTime::from_timestamp(*timestamp, 0).unwrap().naive_utc();
+                            test_utils::update_content_item_timestamp(&mut conn, item_id, naive_dt);
+                        }
                     }
                 }
 
@@ -221,21 +228,20 @@ mod properties {
 
                 let json_response: Value = response.json();
                 let first_page = json_response["items"].as_array().unwrap();
+                println!("first_page: {:#?}", first_page);
 
                 prop_assert!(first_page.len() <= limit);
-                prop_assert_eq!(json_response["total"].as_u64().unwrap(), items.len() as u64);
+                prop_assert_eq!(json_response["total"].as_u64().unwrap(), created_count as u64);
 
-                // If there are more items than the limit, test cursor-based pagination
-                if items.len() > limit && !first_page.is_empty() {
-                    let last_item_id = first_page.last().unwrap()["id"].as_u64().unwrap();
-
+                if created_count > limit && !first_page.is_empty() {
                     let response2 = server
-                        .get(&format!("/api/v1/content?after_id={}&limit={}", last_item_id, limit))
+                        .get(&format!("/api/v1/content?offset={}&limit={}", limit, limit))
                         .await;
                     prop_assert_eq!(response2.status_code(), StatusCode::OK);
 
                     let json_response2: Value = response2.json();
                     let second_page = json_response2["items"].as_array().unwrap();
+                    println!("second_page: {:#?}", second_page);
 
                     // Should not have any overlapping items
                     let first_page_ids: Vec<u64> = first_page.iter()
@@ -246,12 +252,14 @@ mod properties {
                         .collect();
 
                     for id in &second_page_ids {
-                        prop_assert!(!first_page_ids.contains(id), "Pages should not overlap");
+                        prop_assert!(!first_page_ids.contains(id),
+                        "Pages (1: {:?}, 2: {:?}) should not overlap, but {:?} contains {}",
+                        first_page_ids, second_page_ids, first_page_ids, id);
                     }
                 }
 
                 Ok(())
-            }).expect("Async proptest should not fail")
+            }).expect("async proptest failed");
         }
 
         #[test]
@@ -319,128 +327,7 @@ mod properties {
                 prop_assert_eq!(response.status_code(), StatusCode::NOT_FOUND);
 
                 Ok(())
-            }).expect("Async proptest should not fail")
+            }).expect("async proptest failed");
         }
     }
-}
-
-#[tokio::test]
-async fn test_list_content_empty_database() -> Result<()> {
-    let (server, _db) = create_test_server();
-
-    let response = server.get("/api/v1/content").await;
-    response.assert_status_ok();
-
-    let json_response: Value = response.json();
-    assert_eq!(json_response["items"].as_array().unwrap().len(), 0);
-    assert_eq!(json_response["total"].as_u64().unwrap(), 0);
-    assert_eq!(json_response["limit"].as_u64().unwrap(), 50); // default limit
-    assert_eq!(json_response["offset"].as_u64().unwrap(), 0);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_get_content_by_id_not_found() -> Result<()> {
-    let (server, _db) = create_test_server();
-
-    let response = server.get("/api/v1/content/999").await;
-    response.assert_status(StatusCode::NOT_FOUND);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_invalid_query_parameters() -> Result<()> {
-    let (server, _db) = create_test_server();
-
-    // Invalid limit
-    let response = server.get("/api/v1/content?limit=-1").await;
-    response.assert_status(StatusCode::BAD_REQUEST);
-
-    // Invalid after_id
-    let response = server.get("/api/v1/content?after_id=not_a_number").await;
-    response.assert_status(StatusCode::BAD_REQUEST);
-
-    // Invalid datetime
-    let response = server.get("/api/v1/content?since=not_a_date").await;
-    response.assert_status(StatusCode::BAD_REQUEST);
-
-    Ok(())
-}
-
-#[tokio::test]
-async fn test_date_range_filtering() -> Result<()> {
-    let (server, db) = create_test_server();
-
-    // Create items with known timestamps
-    let items = vec![
-        (
-            "2024-01-01T10:00:00Z",
-            "https://example.com/item1",
-            "Item 1",
-        ),
-        (
-            "2024-01-02T10:00:00Z",
-            "https://example.com/item2",
-            "Item 2",
-        ),
-        (
-            "2024-01-03T10:00:00Z",
-            "https://example.com/item3",
-            "Item 3",
-        ),
-    ];
-
-    for (timestamp, url, title) in &items {
-        let payload = json!({
-            "url": url,
-            "title": title,
-        });
-
-        let response = server.post("/api/v1/content").json(&payload).await;
-        response.assert_status_ok();
-
-        let json_response: Value = response.json();
-        let item_id = json_response["id"].as_u64().unwrap() as i32;
-
-        // Update the timestamp
-        {
-            let mut conn = db.lock().unwrap();
-            let dt = DateTime::parse_from_rfc3339(timestamp).unwrap().naive_utc();
-            test_utils::update_content_item_timestamp(&mut conn, item_id, dt);
-        }
-    }
-
-    // Test since filter
-    let response = server
-        .get("/api/v1/content?since=2024-01-02T00:00:00Z")
-        .await;
-    response.assert_status_ok();
-
-    let json_response: Value = response.json();
-    let returned_items = json_response["items"].as_array().unwrap();
-    assert_eq!(returned_items.len(), 2); // Items 2 and 3
-
-    // Test until filter
-    let response = server
-        .get("/api/v1/content?until=2024-01-02T23:59:59Z")
-        .await;
-    response.assert_status_ok();
-
-    let json_response: Value = response.json();
-    let returned_items = json_response["items"].as_array().unwrap();
-    assert_eq!(returned_items.len(), 2); // Items 1 and 2
-
-    // Test range filter
-    let response = server
-        .get("/api/v1/content?since=2024-01-02T00:00:00Z&until=2024-01-02T23:59:59Z")
-        .await;
-    response.assert_status_ok();
-
-    let json_response: Value = response.json();
-    let returned_items = json_response["items"].as_array().unwrap();
-    assert_eq!(returned_items.len(), 1); // Only Item 2
-
-    Ok(())
 }

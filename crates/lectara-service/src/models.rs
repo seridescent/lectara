@@ -2,7 +2,7 @@ use crate::validation::normalize_url;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 
-#[derive(Queryable, Selectable, Serialize)]
+#[derive(Debug, Clone, Queryable, Selectable, Serialize)]
 #[diesel(table_name = crate::schema::content_items)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct ContentItem {
