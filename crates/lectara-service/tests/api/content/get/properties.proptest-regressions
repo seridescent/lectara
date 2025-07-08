@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc e7eb4c80b2b39829bef7dc73799e8027816c18dd7bb2282339fb3219c89c844a # shrinks to (start_date, end_date) = (2020-09-13T12:26:40Z, 2020-09-13T12:26:41Z), items_before = [(1600000000, "https://example.com/aa0", None, None, None)], items_in_range = [(1600000000, "https://example.com/aaa", None, None, None)], items_after = [(1600000000, "https://example.com/aa0", None, None, None)]
+cc c2dc6e2f01a02594c5aa8182f595d36562571b5dee9a265e2e003b974f0f9c8d # shrinks to items = [(1600000000, "https://example.com/a0a", None, None, None), (1631416427, "https://example.com/aaa", None, None, None), (1600000000, "https://example.com/a0b", None, None, None), (1600000000, "https://example.com/aab", None, None, None), (1600000000, "https://example.com/000", None, None, None)], limit = 2

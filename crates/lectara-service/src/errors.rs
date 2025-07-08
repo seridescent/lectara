@@ -18,6 +18,12 @@ pub enum ApiError {
     #[error("URL already exists with different metadata")]
     DuplicateUrlDifferentMetadata,
 
+    #[error("Bad request: {0}")]
+    BadRequest(String),
+
+    #[error("Resource not found")]
+    NotFound,
+
     #[error("Internal server error")]
     InternalError,
 }
@@ -27,6 +33,8 @@ impl IntoResponse for ApiError {
         let (status, error_message) = match self {
             ApiError::ValidationError(ref err) => (StatusCode::BAD_REQUEST, err.to_string()),
             ApiError::DuplicateUrlDifferentMetadata => (StatusCode::CONFLICT, self.to_string()),
+            ApiError::BadRequest(ref message) => (StatusCode::BAD_REQUEST, message.clone()),
+            ApiError::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
             ApiError::DatabaseError(ref err) => {
                 // Log the detailed error but don't expose it to the client
                 error!(error = %err, "Database error occurred");

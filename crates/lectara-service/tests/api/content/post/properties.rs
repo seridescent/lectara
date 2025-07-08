@@ -1,9 +1,8 @@
+use crate::common::server_utils::create_test_server;
 use axum::http::StatusCode;
 use lectara_service::models::NewContentItem;
 use proptest::prelude::*;
 use serde_json::{Value, json};
-
-mod common;
 
 // Generate arbitrary URLs with various normalizable features
 prop_compose! {
@@ -61,9 +60,8 @@ prop_compose! {
 }
 
 #[cfg(test)]
-mod properties {
+mod post_properties {
     use super::*;
-    use crate::common::server_utils::create_test_server;
 
     proptest! {
         #[test]
