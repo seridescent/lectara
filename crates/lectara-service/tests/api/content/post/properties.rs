@@ -60,7 +60,7 @@ prop_compose! {
 }
 
 #[cfg(test)]
-mod properties {
+mod post_properties {
     use super::*;
 
     proptest! {

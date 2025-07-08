@@ -59,6 +59,7 @@ pub mod test_utils {
             .expect("Failed to query content item by URL")
     }
 
+    #[allow(dead_code)]
     pub fn get_content_item_by_id(conn: &mut SqliteConnection, id: i32) -> Option<ContentItem> {
         content_items::table
             .find(id)

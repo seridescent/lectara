@@ -25,7 +25,7 @@ prop_compose! {
     ) -> (i64, String, Option<String>, Option<String>, Option<String>) {
         (
             timestamp,
-            format!("https://example.com/{}", url_suffix),
+            format!("https://example.com/{url_suffix}"),
             title.filter(|s| !s.trim().is_empty()),
             author.filter(|s| !s.trim().is_empty()),
             body.filter(|s| !s.trim().is_empty()),
@@ -34,7 +34,7 @@ prop_compose! {
 }
 
 #[cfg(test)]
-mod properties {
+mod get_properties {
     use chrono::NaiveDateTime;
     use http::StatusCode;
     use serde_json::{Value, json};
@@ -161,7 +161,7 @@ mod properties {
                 // Test filtering with since parameter
                 let since_param = form_urlencoded::byte_serialize(start_date.to_rfc3339().as_bytes()).collect::<String>();
                 let response = server
-                    .get(&format!("/api/v1/content?since={}", since_param))
+                    .get(&format!("/api/v1/content?since={since_param}"))
                     .await;
                 prop_assert_eq!(response.status_code(), StatusCode::OK,
                     "GET /api/v1/content?since={} failed with {}", since_param, response.text());
@@ -222,26 +222,26 @@ mod properties {
 
                 // Get first page
                 let response = server
-                    .get(&format!("/api/v1/content?limit={}", limit))
+                    .get(&format!("/api/v1/content?limit={limit}"))
                     .await;
                 prop_assert_eq!(response.status_code(), StatusCode::OK);
 
                 let json_response: Value = response.json();
                 let first_page = json_response["items"].as_array().unwrap();
-                println!("first_page: {:#?}", first_page);
+                println!("first_page: {first_page:#?}");
 
                 prop_assert!(first_page.len() <= limit);
                 prop_assert_eq!(json_response["total"].as_u64().unwrap(), created_count as u64);
 
                 if created_count > limit && !first_page.is_empty() {
                     let response2 = server
-                        .get(&format!("/api/v1/content?offset={}&limit={}", limit, limit))
+                        .get(&format!("/api/v1/content?offset={limit}&limit={limit}"))
                         .await;
                     prop_assert_eq!(response2.status_code(), StatusCode::OK);
 
                     let json_response2: Value = response2.json();
                     let second_page = json_response2["items"].as_array().unwrap();
-                    println!("second_page: {:#?}", second_page);
+                    println!("second_page: {second_page:#?}");
 
                     // Should not have any overlapping items
                     let first_page_ids: Vec<u64> = first_page.iter()
@@ -291,7 +291,7 @@ mod properties {
                 // Test retrieving each item individually
                 for (i, item_id) in item_ids.iter().enumerate() {
                     let response = server
-                        .get(&format!("/api/v1/content/{}", item_id))
+                        .get(&format!("/api/v1/content/{item_id}"))
                         .await;
                     prop_assert_eq!(response.status_code(), StatusCode::OK);
 
